@@ -62,16 +62,16 @@ Node runs the TypeScript sources in `server/` directly; there is no build step f
    (never `latest`), signs it, attaches the SBOM and provenance, and creates the GitHub release.
 4. Release vpn-server with the same version.
 
-LTS patches are tagged from `lts/X.Y` branches ([ADR 0020](https://github.com/openasy/ui/blob/main/docs/decisions/0020-long-term-support.md)).
+Long-term patches for Enterprise customers are tagged from `lts/X.Y` branches ([ADR 0020](https://github.com/openasy/openasy.github.io/blob/main/docs/decisions/0020-long-term-support.md)).
 The workflow uses its own `GITHUB_TOKEN`; no secrets are needed.
 
 ## Design decisions
 
-See [`docs/decisions/`](https://github.com/openasy/ui/blob/main/docs/decisions/README.md) in `openasy/ui`.
+See [openasy.github.io/principles](https://openasy.github.io/principles) and the records in [openasy.github.io `docs/decisions`](https://github.com/openasy/openasy.github.io/tree/main/docs/decisions).
 
 ## Licence
 
 [AGPL-3.0](./LICENSE). You may use, change and share it; if you run a changed version for others, including as a
 hosted service, you must offer them your source code under the same licence. A commercial licence without these
-obligations is available: see [ADR 0008](https://github.com/openasy/ui/blob/main/docs/decisions/0008-open-source.md).
+obligations is available: see [ADR 0008](https://github.com/openasy/openasy.github.io/blob/main/docs/decisions/0008-open-source.md).
 "OpenAsy" and its logo are trademarks and are not covered by the licence.
