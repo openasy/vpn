@@ -1,0 +1,58 @@
+# VPN: the manager (API and web UI) plus OpenVPN server agents on the same host.
+# Each vpn-server listens on one protocol and port; run one per port you need.
+# Set VPN_SERVER_TOKEN to a long random value, for example: openssl rand -hex 32
+services:
+  vpn-manager:
+    image: ghcr.io/openasy/vpn-manager:0.1.0
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - vpn-manager-data:/data   # SQLite database and settings
+    environment:
+      VPN_SERVER_TOKEN: ${VPN_SERVER_TOKEN:?set VPN_SERVER_TOKEN}
+
+  vpn-server:
+    image: ghcr.io/openasy/vpn-server:0.1.0
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+    ports:
+      - "1194:1194/udp"
+    volumes:
+      - ./openvpn:/etc/openvpn:ro   # server.conf, keys and certificates
+    environment:
+      VPN_MANAGER_URL: http://vpn-manager:8080
+      VPN_SERVER_TOKEN: ${VPN_SERVER_TOKEN:?set VPN_SERVER_TOKEN}
+      VPN_SERVER_ID: edge-1
+      OPENVPN_PROTO: udp
+      OPENVPN_PORT: "1194"
+    depends_on:
+      - vpn-manager
+
+  # The same server on TCP 443, for networks that block everything except HTTPS.
+  # Clients use "proto tcp-client" and "remote <host> 443". Remove it if you do not need it.
+  vpn-server-tcp:
+    image: ghcr.io/openasy/vpn-server:0.1.0
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+    ports:
+      - "443:443/tcp"
+    volumes:
+      - ./openvpn:/etc/openvpn:ro
+    environment:
+      VPN_MANAGER_URL: http://vpn-manager:8080
+      VPN_SERVER_TOKEN: ${VPN_SERVER_TOKEN:?set VPN_SERVER_TOKEN}
+      VPN_SERVER_ID: edge-1-tcp
+      OPENVPN_PROTO: tcp
+      OPENVPN_PORT: "443"
+    depends_on:
+      - vpn-manager
+
+volumes:
+  vpn-manager-data:
