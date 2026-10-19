@@ -53,7 +53,19 @@ const MIGRATIONS = [
    CREATE UNIQUE INDEX devices_active_ip ON devices (vpn_ip) WHERE revoked_at IS NULL;
    CREATE TABLE server_certs (server_id TEXT PRIMARY KEY, serial TEXT NOT NULL, cert TEXT NOT NULL, key TEXT NOT NULL, not_after TEXT NOT NULL);
    -- Revocations outlive the devices they revoke, so a deleted person's certificates stay revoked.
-   CREATE TABLE revocations (serial TEXT PRIMARY KEY, revoked_at TEXT NOT NULL)`,
+   CREATE TABLE revocations (serial TEXT PRIMARY KEY, revoked_at TEXT NOT NULL);
+   -- Live connections as each server last reported them, and disconnects waiting for the next heartbeat.
+   CREATE TABLE sessions (
+     server_id TEXT NOT NULL,
+     cn TEXT NOT NULL,
+     real_address TEXT NOT NULL,
+     vpn_ip TEXT NOT NULL,
+     bytes_in INTEGER NOT NULL,
+     bytes_out INTEGER NOT NULL,
+     connected_at TEXT NOT NULL,
+     PRIMARY KEY (server_id, cn)
+   );
+   CREATE TABLE pending_disconnects (server_id TEXT NOT NULL, cn TEXT NOT NULL, PRIMARY KEY (server_id, cn))`,
 ];
 
 /** Opens the product's single SQLite file in WAL mode (ADR 0011) and migrates it forward. */

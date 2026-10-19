@@ -163,6 +163,17 @@ describe("responses match openapi.json", () => {
     for (const [m, p] of [["GET", "/api/v1/people"], ["POST", "/api/v1/people"], ["GET", "/api/v1/groups"], ["POST", "/api/v1/groups"], ["GET", "/api/v1/ip-groups"], ["POST", "/api/v1/ip-groups"]] as const) await call(m, p, { method: m });
   });
 
+  it("sessions", async () => {
+    const person = (await call("POST", "/api/v1/people", admin({ name: "Zoe Adams", email: "zoe@example.com" }))).body as { id: string };
+    const device = ((await call("POST", "/api/v1/people/{id}/devices", admin({ name: "Phone" }), `/api/v1/people/${person.id}/devices`)).body as { device: { id: string } }).device;
+    const session = { cn: device.id, realAddress: "198.51.100.7:1194", vpnIp: "10.8.0.9", bytesIn: 1, bytesOut: 2, connectedAt: new Date().toISOString() };
+    await call("POST", "/api/v1/servers/heartbeat", json({ id: "edge-1", version, listen: "udp/1194", openvpnRunning: true, sessions: [session] }));
+    expect(((await call("GET", "/api/v1/sessions", admin())).body as { sessions: unknown[] }).sessions).toHaveLength(1);
+    await call("DELETE", "/api/v1/sessions/{server}/{device}", admin(), `/api/v1/sessions/edge-1/${device.id}`);
+    await call("DELETE", "/api/v1/sessions/{server}/{device}", admin(), "/api/v1/sessions/edge-1/missing");
+    await call("GET", "/api/v1/sessions", {});
+  });
+
   it("refuses everything when tokens are not configured", async () => {
     const closed = await startApp({ version, openapi: spec, adminToken: undefined, serverToken: undefined });
     const was = base;

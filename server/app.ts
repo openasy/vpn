@@ -5,7 +5,7 @@ import { extname, join, normalize } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { log } from "./log.ts";
 import { countRequest, renderMetrics } from "./metrics.ts";
-import { VpnError, type Vpn } from "./vpn.ts";
+import { VpnError, type ReportedSession, type Vpn } from "./vpn.ts";
 
 export interface AppOptions {
   db: DatabaseSync;
@@ -103,11 +103,12 @@ async function serveFile(res: ServerResponse, dir: string, relative: string): Pr
 }
 
 async function readJson(req: IncomingMessage, limit = 64 * 1024): Promise<Record<string, unknown>> {
+  const kib = Math.round(limit / 1024);
   let size = 0;
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > limit) throw new HttpProblem(400, "invalid-json", "The body must be JSON, at most 64 KiB.");
+    if (size > limit) throw new HttpProblem(400, "invalid-json", `The body must be JSON, at most ${kib} KiB.`);
     chunks.push(chunk);
   }
   try {
@@ -135,11 +136,41 @@ interface Ctx {
 }
 interface Route {
   method: string;
-  /** Path pattern; `:id` matches one segment. */
+  /** Path pattern; each `:name` matches one segment. */
   path: string;
   auth: Auth;
+  /** Largest accepted body; 64 KiB by default. */
+  bodyLimit?: number;
   handle: (ctx: Ctx) => unknown;
 }
+
+const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+
+function parseSessions(value: unknown): ReportedSession[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 10_000) throw new HttpProblem(422, "invalid-body", "sessions must be a list of at most 10000 entries.");
+  return value.map((x: Partial<ReportedSession>) => {
+    const count = (n: unknown) => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
+    if (
+      typeof x?.cn !== "string" ||
+      x.cn.length > 64 ||
+      typeof x.realAddress !== "string" ||
+      x.realAddress.length > 64 ||
+      typeof x.vpnIp !== "string" ||
+      !IPV4.test(x.vpnIp) ||
+      !count(x.bytesIn) ||
+      !count(x.bytesOut) ||
+      typeof x.connectedAt !== "string" ||
+      Number.isNaN(Date.parse(x.connectedAt))
+    ) {
+      throw new HttpProblem(422, "invalid-body", "Each session needs { cn, realAddress, vpnIp, bytesIn, bytesOut, connectedAt }.");
+    }
+    return { cn: x.cn, realAddress: x.realAddress, vpnIp: x.vpnIp, bytesIn: x.bytesIn!, bytesOut: x.bytesOut!, connectedAt: new Date(x.connectedAt).toISOString() };
+  });
+}
+
+/** Sessions from a server that has not reported for this long are not shown: they may be gone. */
+const SESSION_FRESH_MS = 60_000;
 
 export function createApp({ db, vpn, version, serverToken, adminToken, webDir, docsDir, openapi }: AppOptions) {
   const spec = openapi && JSON.stringify({ ...openapi, info: { ...(openapi.info as object), version } });
@@ -175,8 +206,10 @@ export function createApp({ db, vpn, version, serverToken, adminToken, webDir, d
       method: "POST",
       path: "/api/v1/servers/heartbeat",
       auth: "server",
+      bodyLimit: 1024 * 1024,
       handle: async ({ res, body }) => {
-        const { id, version: agentVersion, listen, openvpnRunning, configVersion } = (await body()) as Partial<Server>;
+        const raw = await body();
+        const { id, version: agentVersion, listen, openvpnRunning, configVersion } = raw as Partial<Server>;
         if (
           typeof id !== "string" ||
           !SERVER_ID.test(id) ||
@@ -189,8 +222,11 @@ export function createApp({ db, vpn, version, serverToken, adminToken, webDir, d
         }
         // ADR 0019: an agent always has the same version as its product.
         if (agentVersion !== version) throw new HttpProblem(409, "version-mismatch", `vpn-server ${agentVersion} does not match vpn-manager ${version}; install vpn-server ${version}`);
+        const sessions = parseSessions(raw.sessions);
         upsertServer.run(id, agentVersion, listen ?? null, openvpnRunning ? 1 : 0, configVersion ?? null, new Date().toISOString());
-        json(res, 202, { status: "accepted" });
+        vpn.recordSessions(id, sessions);
+        // Sessions to end now; the agent also ends any session whose device is no longer in its config.
+        json(res, 202, { status: "accepted", disconnect: vpn.pendingDisconnects(id) });
       },
     },
     {
@@ -208,6 +244,18 @@ export function createApp({ db, vpn, version, serverToken, adminToken, webDir, d
           return;
         }
         json(res, 200, config, { etag, "cache-control": "no-store" });
+      },
+    },
+
+    // Live sessions.
+    { method: "GET", path: "/api/v1/sessions", auth: "admin", handle: () => ({ sessions: vpn.listSessions(SESSION_FRESH_MS) }) },
+    {
+      method: "DELETE",
+      path: "/api/v1/sessions/:server/:device",
+      auth: "admin",
+      handle: ({ res, params }) => {
+        vpn.requestDisconnect(params[0]!, params[1]!);
+        json(res, 202, { status: "accepted" });
       },
     },
 
@@ -232,7 +280,7 @@ export function createApp({ db, vpn, version, serverToken, adminToken, webDir, d
     { method: "DELETE", path: "/api/v1/ip-groups/:id", auth: "admin", handle: ({ res, params }) => (vpn.deleteIpGroup(params[0]!), noContent(res)) },
   ];
 
-  const compiled = routes.map((r) => ({ ...r, re: new RegExp(`^${r.path.replace(/:id/g, "([^/]+)")}$`) }));
+  const compiled = routes.map((r) => ({ ...r, re: new RegExp(`^${r.path.replace(/:[a-z]+/g, "([^/]+)")}$`) }));
 
   function authorize(req: IncomingMessage, auth: Auth) {
     if (auth === "none") return;
@@ -260,7 +308,7 @@ export function createApp({ db, vpn, version, serverToken, adminToken, webDir, d
 
     if (path === "/metrics") {
       const { n } = countServers.get() as { n: number };
-      send(res, 200, renderMetrics(version, n), "text/plain; version=0.0.4");
+      send(res, 200, renderMetrics(version, n, vpn.listSessions(SESSION_FRESH_MS).length), "text/plain; version=0.0.4");
       return "/metrics";
     }
 
@@ -282,7 +330,7 @@ export function createApp({ db, vpn, version, serverToken, adminToken, webDir, d
       try {
         authorize(req, r.auth);
         const params = m.slice(1).map(decodeURIComponent);
-        const result = await r.handle({ req, res, params, body: () => readJson(req) });
+        const result = await r.handle({ req, res, params, body: () => readJson(req, r.bodyLimit) });
         if (!res.headersSent && result !== undefined) json(res, 200, result);
       } catch (err) {
         if (err instanceof HttpProblem || err instanceof VpnError) problem(res, err.status, err.code, err.message);

@@ -68,7 +68,36 @@ export interface ServerConfig {
   key: string;
   crl: string;
   tlsCrypt: string;
-  clients: Array<{ cn: string; ip: string; routes: string[]; fullTunnel: boolean }>;
+  clients: Array<{ cn: string; ip: string; routes: string[]; fullTunnel: boolean; allow: Allow[] }>;
+}
+
+/** One firewall rule: traffic from a device to `cidr`, on these ports (empty: every port). */
+export interface Allow {
+  cidr: string;
+  proto: "tcp" | "udp" | "any";
+  ports: number[];
+}
+
+export interface Session {
+  serverId: string;
+  deviceId: string;
+  deviceName: string | null;
+  personId: string | null;
+  personName: string | null;
+  realAddress: string;
+  vpnIp: string;
+  bytesIn: number;
+  bytesOut: number;
+  connectedAt: string;
+}
+
+export interface ReportedSession {
+  cn: string;
+  realAddress: string;
+  vpnIp: string;
+  bytesIn: number;
+  bytesOut: number;
+  connectedAt: string;
 }
 
 export interface VpnOptions {
@@ -352,15 +381,21 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
         )
         .all(r.person_id) as Array<{ id: string; full_tunnel: number }>;
       const routes = new Set<string>();
+      const allow = new Map<string, Allow>();
       let fullTunnel = false;
       for (const g of groups) {
         if (g.full_tunnel) fullTunnel = true;
-        for (const n of db.prepare("SELECT cidr FROM ip_group_networks WHERE ip_group_id = ?").all(g.id) as Array<{ cidr: string }>) {
+        for (const n of db.prepare("SELECT cidr, ports FROM ip_group_networks WHERE ip_group_id = ?").all(g.id) as Array<{ cidr: string; ports: string }>) {
           if (n.cidr === "0.0.0.0/0") fullTunnel = true;
           else routes.add(n.cidr);
+          for (const rule of parsePorts(n.ports)!) {
+            const a: Allow = { cidr: n.cidr, proto: rule.proto, ports: rule.ports };
+            allow.set(JSON.stringify(a), a);
+          }
         }
       }
-      return { cn: r.cn, ip: r.ip, routes: [...routes].sort(), fullTunnel };
+      const rules = [...allow.values()].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+      return { cn: r.cn, ip: r.ip, routes: [...routes].sort(), fullTunnel, allow: rules };
     });
   }
 
@@ -388,8 +423,65 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
     return { version, ...body };
   }
 
+  // ---- sessions -----------------------------------------------------------
+
+  /** Replaces what a server reported as connected. */
+  function recordSessions(serverId: string, sessions: ReportedSession[]) {
+    db.exec("BEGIN");
+    try {
+      db.prepare("DELETE FROM sessions WHERE server_id = ?").run(serverId);
+      const insert = db.prepare("INSERT OR REPLACE INTO sessions (server_id, cn, real_address, vpn_ip, bytes_in, bytes_out, connected_at) VALUES (?, ?, ?, ?, ?, ?, ?)");
+      for (const x of sessions) insert.run(serverId, x.cn, x.realAddress, x.vpnIp, x.bytesIn, x.bytesOut, x.connectedAt);
+      // A disconnect for a session that is gone is done.
+      db.prepare("DELETE FROM pending_disconnects WHERE server_id = ? AND cn NOT IN (SELECT cn FROM sessions WHERE server_id = ?)").run(serverId, serverId);
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  /** Live sessions from servers that reported within `freshMs`; older reports may be stale. */
+  function listSessions(freshMs: number): Session[] {
+    const since = new Date(Date.now() - freshMs).toISOString();
+    return (
+      db
+        .prepare(
+          `SELECT s.server_id, s.cn, d.name AS device_name, p.id AS person_id, p.name AS person_name, s.real_address, s.vpn_ip, s.bytes_in, s.bytes_out, s.connected_at
+           FROM sessions s JOIN servers v ON v.id = s.server_id
+           LEFT JOIN devices d ON d.id = s.cn LEFT JOIN people p ON p.id = d.person_id
+           WHERE v.last_seen >= ? ORDER BY s.connected_at`,
+        )
+        .all(since) as Array<Record<string, string | number | null>>
+    ).map((r) => ({
+      serverId: r.server_id as string,
+      deviceId: r.cn as string,
+      deviceName: r.device_name as string | null,
+      personId: r.person_id as string | null,
+      personName: r.person_name as string | null,
+      realAddress: r.real_address as string,
+      vpnIp: r.vpn_ip as string,
+      bytesIn: r.bytes_in as number,
+      bytesOut: r.bytes_out as number,
+      connectedAt: r.connected_at as string,
+    }));
+  }
+
+  /** Asks the server to end a session at its next heartbeat. The device may connect again if it is still allowed. */
+  function requestDisconnect(serverId: string, deviceId: string) {
+    if (!db.prepare("SELECT 1 FROM sessions WHERE server_id = ? AND cn = ?").get(serverId, deviceId)) throw notFound("Session");
+    db.prepare("INSERT OR IGNORE INTO pending_disconnects (server_id, cn) VALUES (?, ?)").run(serverId, deviceId);
+  }
+
+  const pendingDisconnects = (serverId: string) =>
+    (db.prepare("SELECT cn FROM pending_disconnects WHERE server_id = ? ORDER BY cn").all(serverId) as Array<{ cn: string }>).map((r) => r.cn);
+
   return {
     init,
+    recordSessions,
+    listSessions,
+    requestDisconnect,
+    pendingDisconnects,
     listGroups,
     createGroup,
     deleteGroup,

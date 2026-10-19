@@ -49,10 +49,15 @@ How it works:
   config costs a 304), writes it for OpenVPN and restarts OpenVPN only when certificates or the server settings change.
 - Only listed devices may connect (`ccd-exclusive`). Revoking a device puts it on the CRL, which OpenVPN checks on every
   new connection; suspending a person removes their devices until they are active again.
-- Each device gets routes to the networks of the IP groups its person's groups may use, or all traffic for a full-tunnel IP group.
+- Each device gets routes to the networks of the IP groups its person's groups may use, or all traffic for a full-tunnel
+  IP group. The server's firewall lets it reach only those networks and ports; everything else from the device is
+  dropped, including other devices and the server itself.
+- Servers report live sessions every heartbeat: `GET /api/v1/sessions`. A device that is revoked, suspended or deleted
+  is disconnected at the next heartbeat. `DELETE /api/v1/sessions/{server}/{device}` ends one session; the device may
+  reconnect if it is still allowed.
+- A client config lists the servers vpn-manager knows when the file is created, so start the servers before adding devices.
 
-Not built yet: firewall rules per port (routes are sent, but the server does not yet block other ports), disconnecting
-live sessions on revoke, the people and access screens in the UI, and the CLI.
+Not built yet: the people, access and sessions screens in the UI, and the CLI.
 
 ## Endpoints
 
@@ -66,6 +71,7 @@ live sessions on revoke, the people and access screens in the UI, and the CLI.
 | `GET /api/v1/servers/{id}/config` | Used by vpn-server: what its OpenVPN must run |
 | `/api/v1/people`, `/api/v1/people/{id}/devices`, `/api/v1/devices/{id}` | People and their devices |
 | `/api/v1/groups`, `/api/v1/ip-groups` | Groups, and the networks each group may reach |
+| `GET /api/v1/sessions`, `DELETE /api/v1/sessions/{server}/{device}` | Devices connected now; end a session |
 | `/api/docs/` | Interactive API reference (Swagger UI), bundled in the image |
 | `/api/openapi.json` | OpenAPI 3.1 description |
 
@@ -95,7 +101,8 @@ npm ci
 npm start      # API on :8080 (set VPN_MANAGER_DB=./data/vpn-manager.db)
 npm run dev    # web UI on :5173, proxies /api
 npm run typecheck && npm test
-e2e/run.sh     # needs Docker and the vpn-manager:dev and vpn-server:dev images: a real OpenVPN client connects
+e2e/run.sh     # needs Docker and the vpn-manager:dev and vpn-server:dev images: a real OpenVPN client connects,
+               # reaches an allowed port, is blocked on another, is disconnected, and is refused after revoke
 ```
 
 Node runs the TypeScript sources in `server/` directly; there is no build step for the server.

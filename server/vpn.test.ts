@@ -18,7 +18,7 @@ const config = async () => (await (await app.agent("/api/v1/servers/edge-1/confi
   ca: string;
   cert: string;
   crl: string;
-  clients: Array<{ cn: string; ip: string; routes: string[]; fullTunnel: boolean }>;
+  clients: Array<{ cn: string; ip: string; routes: string[]; fullTunnel: boolean; allow: Array<{ cidr: string; proto: string; ports: number[] }> }>;
 };
 const pemBlock = (text: string, tag: string) => text.match(new RegExp(`<${tag}>\\n([\\s\\S]*?)\\n</${tag}>`))?.[1];
 
@@ -93,7 +93,16 @@ describe("people, groups and devices", () => {
     const ca = new X509Certificate(c.ca);
     expect(new X509Certificate(c.cert).verify(ca.publicKey)).toBe(true);
     expect(new X509Certificate(c.cert).subject).toBe("CN=edge-1");
-    expect(c.clients).toContainEqual({ cn: deviceId, ip: "10.8.0.2", routes: ["172.16.20.0/24", "172.16.40.12/32"], fullTunnel: false });
+    expect(c.clients).toContainEqual({
+      cn: deviceId,
+      ip: "10.8.0.2",
+      routes: ["172.16.20.0/24", "172.16.40.12/32"],
+      fullTunnel: false,
+      allow: [
+        { cidr: "172.16.20.0/24", proto: "tcp", ports: [5432] },
+        { cidr: "172.16.40.12/32", proto: "tcp", ports: [6379] },
+      ],
+    });
 
     const etag = (await app.agent("/api/v1/servers/edge-1/config")).headers.get("etag")!;
     expect((await app.agent("/api/v1/servers/edge-1/config", { headers: { "if-none-match": etag } })).status).toBe(304);
@@ -167,5 +176,54 @@ describe("client configs", () => {
     const { ovpn } = (await (await a.admin(`/api/v1/people/${person.id}/devices`, { method: "POST", body: JSON.stringify({ name: "Laptop" }) })).json()) as { ovpn: string };
     expect(ovpn.match(/^remote .*$/gm)).toEqual(["remote vpn.example.com 1194 udp", "remote vpn.example.com 443 tcp-client"]);
     await a.close();
+  });
+});
+
+describe("sessions", () => {
+  let s: Awaited<ReturnType<typeof startApp>>;
+  let device: { id: string };
+  const beat = (sessions: unknown, id = "edge-1") =>
+    s.agent("/api/v1/servers/heartbeat", { method: "POST", body: JSON.stringify({ id, version: "1.2.3", listen: "udp/1194", openvpnRunning: true, sessions }) });
+  const live = (cn: string, extra = {}) => ({ cn, realAddress: "203.0.113.24:51820", vpnIp: "10.8.0.2", bytesIn: 1200, bytesOut: 34000, connectedAt: "2026-10-19T10:00:00Z", ...extra });
+
+  beforeAll(async () => {
+    s = await startApp({ version: "1.2.3" });
+    const person = (await (await s.admin("/api/v1/people", { method: "POST", body: JSON.stringify({ name: "Dana Kim", email: "dana@example.com" }) })).json()) as { id: string };
+    device = ((await (await s.admin(`/api/v1/people/${person.id}/devices`, { method: "POST", body: JSON.stringify({ name: "Laptop" }) })).json()) as { device: { id: string } }).device;
+  });
+  afterAll(() => s.close());
+
+  it("lists what servers report, with the person and device", async () => {
+    expect((await beat([live(device.id)])).status).toBe(202);
+    const { sessions } = (await (await s.admin("/api/v1/sessions")).json()) as { sessions: Array<Record<string, unknown>> };
+    expect(sessions).toEqual([
+      { serverId: "edge-1", deviceId: device.id, deviceName: "Laptop", personId: expect.any(String), personName: "Dana Kim", realAddress: "203.0.113.24:51820", vpnIp: "10.8.0.2", bytesIn: 1200, bytesOut: 34000, connectedAt: "2026-10-19T10:00:00.000Z" },
+    ]);
+    expect(await (await fetch(`${s.base}/metrics`)).text()).toContain("openasy_vpn_sessions 1");
+  });
+
+  it("rejects malformed sessions", async () => {
+    expect((await beat([live(device.id, { vpnIp: "nope" })])).status).toBe(422);
+    expect((await beat("nope")).status).toBe(422);
+  });
+
+  it("hands a disconnect to the server once, and forgets it when the session is gone", async () => {
+    expect((await s.admin(`/api/v1/sessions/edge-1/${device.id}`, { method: "DELETE" })).status).toBe(202);
+    expect(((await (await beat([live(device.id)])).json()) as { disconnect: string[] }).disconnect).toEqual([device.id]);
+    const after = (await (await beat([])).json()) as { disconnect: string[] };
+    expect(after.disconnect).toEqual([]);
+    expect(((await (await s.admin("/api/v1/sessions")).json()) as { sessions: unknown[] }).sessions).toEqual([]);
+    expect((await s.admin(`/api/v1/sessions/edge-1/${device.id}`, { method: "DELETE" })).status).toBe(404);
+  });
+
+  it("hides sessions from servers that stopped reporting", async () => {
+    await beat([live(device.id)], "edge-2");
+    s.db.prepare("UPDATE servers SET last_seen = ? WHERE id = 'edge-2'").run(new Date(Date.now() - 5 * 60_000).toISOString());
+    expect(((await (await s.admin("/api/v1/sessions")).json()) as { sessions: unknown[] }).sessions).toEqual([]);
+  });
+
+  it("accepts a heartbeat with many sessions", async () => {
+    const many = Array.from({ length: 2000 }, (_, i) => live(`cn-${i}`));
+    expect((await beat(many)).status).toBe(202);
   });
 });

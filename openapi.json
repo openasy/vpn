@@ -26,6 +26,10 @@
       "description": "Groups of people, and IP groups: the networks each group may reach."
     },
     {
+      "name": "Sessions",
+      "description": "Devices connected right now."
+    },
+    {
       "name": "Servers",
       "description": "OpenVPN servers run by vpn-server agents."
     },
@@ -402,6 +406,95 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Device"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/sessions": {
+      "get": {
+        "operationId": "listSessions",
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "List live sessions",
+        "description": "From servers that reported in the last minute.",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sessions, oldest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{server}/{device}": {
+      "delete": {
+        "operationId": "disconnectSession",
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Disconnect a session",
+        "description": "The server ends it at its next heartbeat, within 15 seconds. A device that is still allowed may connect again; revoke it or suspend the person to keep it out.",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Server id."
+          },
+          {
+            "name": "device",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Device id."
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Will be disconnected.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Accepted"
                 }
               }
             }
@@ -803,7 +896,7 @@
           "Servers"
         ],
         "summary": "Report a server's state",
-        "description": "Called by vpn-server every 15 seconds. The agent must have the same version as the manager (ADR 0019).",
+        "description": "Called by vpn-server every 15 seconds with its live sessions. The answer lists sessions to end now. The agent must have the same version as the manager (ADR 0019).",
         "security": [
           {
             "serverToken": []
@@ -825,7 +918,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Accepted"
+                  "$ref": "#/components/schemas/HeartbeatAccepted"
                 }
               }
             }
@@ -1148,6 +1241,14 @@
               "null"
             ],
             "description": "Version of the config the agent applied."
+          },
+          "sessions": {
+            "type": "array",
+            "maxItems": 10000,
+            "items": {
+              "$ref": "#/components/schemas/ReportedSession"
+            },
+            "description": "Connected devices, from OpenVPN's management interface."
           }
         }
       },
@@ -1512,7 +1613,7 @@
           },
           "ports": {
             "type": "string",
-            "description": "Ports for the firewall rules, or any.",
+            "description": "Ports the server lets members reach; everything else is dropped. `any` allows every port.",
             "examples": [
               "tcp/5432, 6432",
               "any"
@@ -1548,7 +1649,7 @@
           },
           "fullTunnel": {
             "type": "boolean",
-            "description": "Send all of a member's traffic through the VPN."
+            "description": "Send all of a member's traffic through the VPN. Where it may go is still set by the networks; add 0.0.0.0/0 to allow the internet."
           },
           "networks": {
             "type": "array",
@@ -1707,7 +1808,8 @@
                 "cn",
                 "ip",
                 "routes",
-                "fullTunnel"
+                "fullTunnel",
+                "allow"
               ],
               "properties": {
                 "cn": {
@@ -1727,9 +1829,190 @@
                 },
                 "fullTunnel": {
                   "type": "boolean"
+                },
+                "allow": {
+                  "type": "array",
+                  "description": "Firewall rules: where the device may go. Everything else from the device is dropped.",
+                  "items": {
+                    "$ref": "#/components/schemas/Allow"
+                  }
                 }
               }
             }
+          }
+        }
+      },
+      "HeartbeatAccepted": {
+        "type": "object",
+        "required": [
+          "status",
+          "disconnect"
+        ],
+        "properties": {
+          "status": {
+            "const": "accepted"
+          },
+          "disconnect": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Device ids whose sessions the server must end now."
+          }
+        }
+      },
+      "ReportedSession": {
+        "type": "object",
+        "required": [
+          "cn",
+          "realAddress",
+          "vpnIp",
+          "bytesIn",
+          "bytesOut",
+          "connectedAt"
+        ],
+        "properties": {
+          "cn": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Device id."
+          },
+          "realAddress": {
+            "type": "string",
+            "maxLength": 64,
+            "examples": [
+              "203.0.113.24:51820"
+            ]
+          },
+          "vpnIp": {
+            "type": "string",
+            "format": "ipv4"
+          },
+          "bytesIn": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "bytesOut": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "connectedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Session": {
+        "type": "object",
+        "required": [
+          "serverId",
+          "deviceId",
+          "deviceName",
+          "personId",
+          "personName",
+          "realAddress",
+          "vpnIp",
+          "bytesIn",
+          "bytesOut",
+          "connectedAt"
+        ],
+        "properties": {
+          "serverId": {
+            "$ref": "#/components/schemas/ServerId"
+          },
+          "deviceId": {
+            "type": "string"
+          },
+          "deviceName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Null when the device was deleted while connected."
+          },
+          "personId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "personName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "realAddress": {
+            "type": "string",
+            "description": "Where the device connects from.",
+            "examples": [
+              "203.0.113.24:51820"
+            ]
+          },
+          "vpnIp": {
+            "type": "string",
+            "format": "ipv4",
+            "examples": [
+              "10.8.0.2"
+            ]
+          },
+          "bytesIn": {
+            "type": "integer",
+            "description": "Bytes the server received from the device."
+          },
+          "bytesOut": {
+            "type": "integer",
+            "description": "Bytes the server sent to the device."
+          },
+          "connectedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SessionList": {
+        "type": "object",
+        "required": [
+          "sessions"
+        ],
+        "properties": {
+          "sessions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Session"
+            }
+          }
+        }
+      },
+      "Allow": {
+        "type": "object",
+        "required": [
+          "cidr",
+          "proto",
+          "ports"
+        ],
+        "properties": {
+          "cidr": {
+            "type": "string",
+            "examples": [
+              "172.16.20.0/24"
+            ]
+          },
+          "proto": {
+            "enum": [
+              "tcp",
+              "udp",
+              "any"
+            ]
+          },
+          "ports": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "description": "Empty: every port."
           }
         }
       }

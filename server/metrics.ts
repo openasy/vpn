@@ -1,4 +1,4 @@
-// Prometheus text exposition, written by hand to keep the server free of runtime dependencies.
+// Prometheus text exposition, written by hand: a few lines, no client library needed.
 const requests = new Map<string, number>();
 
 export function countRequest(method: string, route: string, status: number) {
@@ -6,7 +6,7 @@ export function countRequest(method: string, route: string, status: number) {
   requests.set(key, (requests.get(key) ?? 0) + 1);
 }
 
-export function renderMetrics(version: string, servers: number): string {
+export function renderMetrics(version: string, servers: number, sessions: number): string {
   const lines = [
     "# HELP openasy_build_info Build information.",
     "# TYPE openasy_build_info gauge",
@@ -17,6 +17,9 @@ export function renderMetrics(version: string, servers: number): string {
     "# HELP openasy_vpn_servers Known VPN servers.",
     "# TYPE openasy_vpn_servers gauge",
     `openasy_vpn_servers ${servers}`,
+    "# HELP openasy_vpn_sessions Connected devices, as servers last reported.",
+    "# TYPE openasy_vpn_sessions gauge",
+    `openasy_vpn_sessions ${sessions}`,
     "# HELP process_uptime_seconds Seconds since the process started.",
     "# TYPE process_uptime_seconds gauge",
     `process_uptime_seconds ${process.uptime().toFixed(0)}`,
