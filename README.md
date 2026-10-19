@@ -68,3 +68,10 @@ The workflow uses its own `GITHUB_TOKEN`; no secrets are needed.
 ## Design decisions
 
 See [`docs/decisions/`](https://github.com/openasy/ui/blob/main/docs/decisions/README.md) in `openasy/ui`.
+
+## Licence
+
+[AGPL-3.0](./LICENSE). You may use, change and share it; if you run a changed version for others, including as a
+hosted service, you must offer them your source code under the same licence. A commercial licence without these
+obligations is available: see [ADR 0008](https://github.com/openasy/ui/blob/main/docs/decisions/0008-open-source.md).
+"OpenAsy" and its logo are trademarks and are not covered by the licence.
