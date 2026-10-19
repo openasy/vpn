@@ -10,9 +10,10 @@ RUN npm run build && mkdir -p /out/data
 # The server has no runtime dependencies: Node runs the TypeScript sources directly.
 FROM gcr.io/distroless/nodejs26-debian13:nonroot
 WORKDIR /app
-COPY --from=build /app/package.json ./
+COPY --from=build /app/package.json /app/openapi.json ./
 COPY --from=build /app/server ./server
 COPY --from=build /app/dist/web ./dist/web
+COPY --from=build /app/dist/docs ./dist/docs
 COPY --from=build --chown=nonroot:nonroot /out/data /data
 ENV NODE_ENV=production PORT=8080 VPN_MANAGER_DB=/data/vpn-manager.db
 VOLUME /data

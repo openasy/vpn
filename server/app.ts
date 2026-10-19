@@ -13,6 +13,10 @@ export interface AppOptions {
   serverToken?: string;
   /** Built web UI; omit to run headless (ADR 0018). */
   webDir?: string;
+  /** Built API reference (Swagger UI), served at /api/docs. */
+  docsDir?: string;
+  /** The OpenAPI description, served at /api/openapi.json with this release's version. */
+  openapi?: Record<string, unknown>;
 }
 
 interface Server {
@@ -27,6 +31,7 @@ interface Server {
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript",
+  ".json": "application/json",
   ".css": "text/css",
   ".svg": "image/svg+xml",
   ".png": "image/png",
@@ -48,6 +53,35 @@ function send(res: ServerResponse, status: number, body: string | Buffer, type =
 
 const json = (res: ServerResponse, status: number, data: unknown) => send(res, status, JSON.stringify(data));
 
+type ProblemCode = "invalid-token" | "invalid-json" | "invalid-body" | "version-mismatch" | "not-found" | "internal-error";
+
+const TITLES: Record<ProblemCode, string> = {
+  "invalid-token": "Invalid token",
+  "invalid-json": "Invalid JSON",
+  "invalid-body": "Invalid request body",
+  "version-mismatch": "Version mismatch",
+  "not-found": "Not found",
+  "internal-error": "Internal error",
+};
+
+/** RFC 9457 Problem Details (ADR 0024). `code` is the stable part clients match on. */
+function problem(res: ServerResponse, status: number, code: ProblemCode, detail?: string) {
+  const body = { type: `https://openasy.github.io/problems/${code}`, title: TITLES[code], status, code, ...(detail && { detail }) };
+  send(res, status, JSON.stringify(body), "application/problem+json");
+}
+
+/** Serves a file from dir, or returns false when the path is outside it or missing. */
+async function serveFile(res: ServerResponse, dir: string, relative: string): Promise<boolean> {
+  const file = normalize(join(dir, relative));
+  if (!file.startsWith(normalize(dir)) || !extname(file)) return false;
+  try {
+    send(res, 200, await readFile(file), TYPES[extname(file)] ?? "application/octet-stream");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function readJson(req: IncomingMessage, limit = 16 * 1024): Promise<unknown> {
   let size = 0;
   const chunks: Buffer[] = [];
@@ -66,7 +100,8 @@ function tokenMatches(header: string | undefined, expected: string | undefined):
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-export function createApp({ db, version, serverToken, webDir }: AppOptions) {
+export function createApp({ db, version, serverToken, webDir, docsDir, openapi }: AppOptions) {
+  const spec = openapi && JSON.stringify({ ...openapi, info: { ...(openapi.info as object), version } });
   const listServers = db.prepare("SELECT id, version, listen, openvpn_running, last_seen FROM servers ORDER BY id");
   const countServers = db.prepare("SELECT COUNT(*) AS n FROM servers");
   const upsertServer = db.prepare(
@@ -96,6 +131,18 @@ export function createApp({ db, version, serverToken, webDir }: AppOptions) {
       return "/metrics";
     }
 
+    if (path === "/api/openapi.json" && spec) return (send(res, 200, spec), "/api/openapi.json");
+
+    if (docsDir && (path === "/api/docs" || path.startsWith("/api/docs/"))) {
+      if (path === "/api/docs") {
+        res.writeHead(301, { ...SECURITY_HEADERS, location: "/api/docs/" }).end();
+        return "/api/docs";
+      }
+      const relative = path.slice("/api/docs/".length) || "index.html";
+      if (!(await serveFile(res, docsDir, relative))) problem(res, 404, "not-found");
+      return "/api/docs";
+    }
+
     if (path === "/api/v1/version" && req.method === "GET") {
       return (json(res, 200, { product: "vpn-manager", version }), "/api/v1/version");
     }
@@ -107,12 +154,12 @@ export function createApp({ db, version, serverToken, webDir }: AppOptions) {
     }
 
     if (path === "/api/v1/servers/heartbeat" && req.method === "POST") {
-      if (!tokenMatches(req.headers.authorization, serverToken)) return (json(res, 401, { error: "invalid token" }), path);
+      if (!tokenMatches(req.headers.authorization, serverToken)) return (problem(res, 401, "invalid-token", "Send the VPN_SERVER_TOKEN as a bearer token."), path);
       let body: unknown;
       try {
         body = await readJson(req);
       } catch {
-        return (json(res, 400, { error: "invalid JSON body" }), path);
+        return (problem(res, 400, "invalid-json", "The body must be JSON, at most 16 KiB."), path);
       }
       const { id, version: agentVersion, listen, openvpnRunning } = (body ?? {}) as Partial<Server>;
       if (
@@ -122,32 +169,25 @@ export function createApp({ db, version, serverToken, webDir }: AppOptions) {
         typeof openvpnRunning !== "boolean" ||
         (listen != null && (typeof listen !== "string" || !/^(udp|tcp)\/\d{1,5}$/.test(listen)))
       ) {
-        return (json(res, 422, { error: "expected { id, version, listen?, openvpnRunning }" }), path);
+        return (problem(res, 422, "invalid-body", "Expected { id, version, listen?, openvpnRunning }."), path);
       }
       // ADR 0019: an agent always has the same version as its product.
       if (agentVersion !== version) {
-        return (json(res, 409, { error: `vpn-server ${agentVersion} does not match vpn-manager ${version}; install vpn-server ${version}` }), path);
+        return (problem(res, 409, "version-mismatch", `vpn-server ${agentVersion} does not match vpn-manager ${version}; install vpn-server ${version}`), path);
       }
       upsertServer.run(id, agentVersion, listen ?? null, openvpnRunning ? 1 : 0, new Date().toISOString());
       return (json(res, 202, { status: "accepted" }), path);
     }
 
-    if (path.startsWith("/api/")) return (json(res, 404, { error: "not found" }), "/api/*");
+    if (path.startsWith("/api/")) return (problem(res, 404, "not-found"), "/api/*");
 
     if (webDir && (req.method === "GET" || req.method === "HEAD")) {
-      const file = normalize(join(webDir, path === "/" ? "index.html" : path));
-      const inside = file.startsWith(normalize(webDir));
-      try {
-        if (!inside || !extname(file)) throw new Error("spa route");
-        send(res, 200, await readFile(file), TYPES[extname(file)] ?? "application/octet-stream");
-      } catch {
-        // Unknown paths fall back to the single-page app.
-        send(res, 200, await readFile(join(webDir, "index.html")), TYPES[".html"]);
-      }
+      // Unknown paths fall back to the single-page app.
+      if (!(await serveFile(res, webDir, path === "/" ? "index.html" : path))) send(res, 200, await readFile(join(webDir, "index.html")), TYPES[".html"]);
       return "/web";
     }
 
-    json(res, 404, { error: "not found" });
+    problem(res, 404, "not-found");
     return "unmatched";
   }
 
@@ -158,7 +198,7 @@ export function createApp({ db, version, serverToken, webDir }: AppOptions) {
       routeName = await route(req, res);
     } catch (err) {
       log("error", "request failed", { error: String(err), path: req.url });
-      if (!res.headersSent) json(res, 500, { error: "internal error" });
+      if (!res.headersSent) problem(res, 500, "internal-error");
     }
     countRequest(req.method ?? "GET", routeName, res.statusCode);
     if (routeName !== "/healthz" && routeName !== "/metrics") {

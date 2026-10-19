@@ -8,6 +8,8 @@ const { version } = JSON.parse(readFileSync(new URL("../package.json", import.me
 const port = Number(process.env.PORT ?? 8080);
 const dbPath = process.env.VPN_MANAGER_DB ?? "/data/vpn-manager.db";
 const webDir = new URL("../dist/web", import.meta.url).pathname;
+const docsDir = new URL("../dist/docs", import.meta.url).pathname;
+const openapi = JSON.parse(readFileSync(new URL("../openapi.json", import.meta.url), "utf8")) as Record<string, unknown>;
 const headless = process.env.VPN_MANAGER_HEADLESS === "true";
 
 const db = openDb(dbPath);
@@ -17,6 +19,8 @@ const server = createServer(
     version,
     serverToken: process.env.VPN_SERVER_TOKEN,
     webDir: !headless && existsSync(webDir) ? webDir : undefined,
+    docsDir: existsSync(docsDir) ? docsDir : undefined,
+    openapi,
   }),
 );
 

@@ -50,7 +50,8 @@ describe("server heartbeat", () => {
   it("refuses an agent of another version", async () => {
     const res = await heartbeat({ id: "edge-1", version: "1.1.0", openvpnRunning: true });
     expect(res.status).toBe(409);
-    expect(((await res.json()) as { error: string }).error).toContain("install vpn-server 1.2.3");
+    expect(res.headers.get("content-type")).toBe("application/problem+json");
+    expect(await res.json()).toMatchObject({ status: 409, code: "version-mismatch", detail: expect.stringContaining("install vpn-server 1.2.3") });
   });
 
   it("validates the body", async () => {

@@ -28,6 +28,13 @@ docker compose up -d
 | `GET /api/v1/version` | Product and version |
 | `GET /api/v1/servers` | Known VPN servers |
 | `POST /api/v1/servers/heartbeat` | Used by vpn-server |
+| `/api/docs/` | Interactive API reference (Swagger UI), bundled in the image |
+| `/api/openapi.json` | OpenAPI 3.1 description |
+
+The description lives in [`openapi.json`](./openapi.json) and is the contract: `server/openapi.test.ts` calls every
+operation and fails if a response does not match it. Errors are RFC 9457 Problem Details
+(`application/problem+json`) with a stable `code`. The reference is also on the site, without "Try it":
+https://openasy.github.io/products/vpn/api
 
 ## Verify an image
 

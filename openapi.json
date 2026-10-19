@@ -1,0 +1,187 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "OpenAsy VPN manager API",
+    "version": "0.1.0",
+    "summary": "Servers, users and access for OpenVPN.",
+    "description": "Every screen of vpn-manager uses this API, and so can your scripts (ADR 0014). Within `/api/v1` changes are additive only; anything removed is deprecated first (ADR 0024). Errors use Problem Details (RFC 9457).",
+    "license": { "name": "AGPL-3.0-only", "identifier": "AGPL-3.0-only" }
+  },
+  "servers": [{ "url": "/", "description": "This vpn-manager" }],
+  "tags": [
+    { "name": "Servers", "description": "OpenVPN servers run by vpn-server agents." },
+    { "name": "Product", "description": "Version and health of this vpn-manager." }
+  ],
+  "paths": {
+    "/api/v1/version": {
+      "get": {
+        "operationId": "getVersion",
+        "tags": ["Product"],
+        "summary": "Product and version",
+        "responses": {
+          "200": {
+            "description": "The running product and its version.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Version" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/servers": {
+      "get": {
+        "operationId": "listServers",
+        "tags": ["Servers"],
+        "summary": "List VPN servers",
+        "description": "Every vpn-server agent that has reported to this manager, with its last heartbeat.",
+        "responses": {
+          "200": {
+            "description": "Known servers, ordered by id.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ServerList" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/servers/heartbeat": {
+      "post": {
+        "operationId": "sendHeartbeat",
+        "tags": ["Servers"],
+        "summary": "Report a server's state",
+        "description": "Called by vpn-server every 15 seconds. The agent must have the same version as the manager (ADR 0019).",
+        "security": [{ "serverToken": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Heartbeat" } } }
+        },
+        "responses": {
+          "202": {
+            "description": "Recorded.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Accepted" } } }
+          },
+          "400": { "$ref": "#/components/responses/Problem" },
+          "401": { "$ref": "#/components/responses/Problem" },
+          "409": { "$ref": "#/components/responses/Problem" },
+          "422": { "$ref": "#/components/responses/Problem" }
+        }
+      }
+    },
+    "/healthz": {
+      "get": {
+        "operationId": "liveness",
+        "tags": ["Product"],
+        "summary": "Liveness",
+        "responses": {
+          "200": { "description": "The process is running.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Status" } } } }
+        }
+      }
+    },
+    "/readyz": {
+      "get": {
+        "operationId": "readiness",
+        "tags": ["Product"],
+        "summary": "Readiness",
+        "responses": {
+          "200": { "description": "Ready to serve.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Status" } } } },
+          "503": { "description": "The database is unavailable.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Status" } } } }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "operationId": "metrics",
+        "tags": ["Product"],
+        "summary": "Prometheus metrics",
+        "responses": {
+          "200": { "description": "Metrics in the Prometheus text format.", "content": { "text/plain": { "schema": { "type": "string" } } } }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "serverToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "The `VPN_SERVER_TOKEN` shared with vpn-server agents."
+      }
+    },
+    "responses": {
+      "Problem": {
+        "description": "The request was refused. `code` is stable; `detail` says what to do.",
+        "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } }
+      }
+    },
+    "schemas": {
+      "Version": {
+        "type": "object",
+        "required": ["product", "version"],
+        "properties": {
+          "product": { "const": "vpn-manager" },
+          "version": { "type": "string", "description": "SemVer of this release.", "examples": ["0.1.0"] }
+        }
+      },
+      "Server": {
+        "type": "object",
+        "required": ["id", "version", "listen", "openvpnRunning", "lastSeen"],
+        "properties": {
+          "id": { "$ref": "#/components/schemas/ServerId" },
+          "version": { "type": "string", "examples": ["0.1.0"] },
+          "listen": { "$ref": "#/components/schemas/Listen" },
+          "openvpnRunning": { "type": "boolean" },
+          "lastSeen": { "type": "string", "format": "date-time" }
+        }
+      },
+      "ServerList": {
+        "type": "object",
+        "required": ["servers"],
+        "properties": { "servers": { "type": "array", "items": { "$ref": "#/components/schemas/Server" } } }
+      },
+      "ServerId": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+        "description": "Lowercase letters, digits and dashes.",
+        "examples": ["edge-1"]
+      },
+      "Listen": {
+        "type": ["string", "null"],
+        "pattern": "^(udp|tcp)/\\d{1,5}$",
+        "description": "Protocol and port the server listens on; null when its config file decides.",
+        "examples": ["udp/1194", "tcp/443"]
+      },
+      "Heartbeat": {
+        "type": "object",
+        "required": ["id", "version", "openvpnRunning"],
+        "properties": {
+          "id": { "$ref": "#/components/schemas/ServerId" },
+          "version": { "type": "string", "examples": ["0.1.0"] },
+          "listen": { "$ref": "#/components/schemas/Listen" },
+          "openvpnRunning": { "type": "boolean" }
+        }
+      },
+      "Accepted": {
+        "type": "object",
+        "required": ["status"],
+        "properties": { "status": { "const": "accepted" } }
+      },
+      "Status": {
+        "type": "object",
+        "required": ["status"],
+        "properties": { "status": { "type": "string", "examples": ["ok", "ready"] } }
+      },
+      "Problem": {
+        "type": "object",
+        "description": "RFC 9457 Problem Details.",
+        "required": ["type", "title", "status", "code"],
+        "properties": {
+          "type": { "type": "string", "format": "uri-reference", "examples": ["https://openasy.github.io/problems/version-mismatch"] },
+          "title": { "type": "string", "examples": ["Version mismatch"] },
+          "status": { "type": "integer", "minimum": 400, "maximum": 599 },
+          "detail": { "type": "string", "examples": ["vpn-server 0.0.9 does not match vpn-manager 0.1.0; install vpn-server 0.1.0"] },
+          "code": {
+            "type": "string",
+            "description": "Stable identifier to match on in code.",
+            "enum": ["invalid-token", "invalid-json", "invalid-body", "version-mismatch", "not-found", "internal-error"]
+          }
+        }
+      }
+    }
+  }
+}
