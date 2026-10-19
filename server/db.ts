@@ -11,6 +11,49 @@ const MIGRATIONS = [
      openvpn_running INTEGER NOT NULL,
      last_seen TEXT NOT NULL
    )`,
+  // 0.2.0: the VPN itself. People and their devices, groups, IP groups, the CA and server certificates.
+  `ALTER TABLE servers ADD COLUMN config_version TEXT;
+   CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+   CREATE TABLE people (
+     id TEXT PRIMARY KEY,
+     name TEXT NOT NULL,
+     email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+     status TEXT NOT NULL CHECK (status IN ('active', 'suspended')),
+     created_at TEXT NOT NULL
+   );
+   CREATE TABLE groups (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE);
+   CREATE TABLE person_groups (
+     person_id TEXT NOT NULL REFERENCES people (id) ON DELETE CASCADE,
+     group_id TEXT NOT NULL REFERENCES groups (id) ON DELETE CASCADE,
+     PRIMARY KEY (person_id, group_id)
+   );
+   CREATE TABLE ip_groups (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, full_tunnel INTEGER NOT NULL DEFAULT 0);
+   CREATE TABLE ip_group_networks (
+     ip_group_id TEXT NOT NULL REFERENCES ip_groups (id) ON DELETE CASCADE,
+     cidr TEXT NOT NULL,
+     ports TEXT NOT NULL DEFAULT 'any',
+     note TEXT NOT NULL DEFAULT ''
+   );
+   CREATE TABLE ip_group_access (
+     ip_group_id TEXT NOT NULL REFERENCES ip_groups (id) ON DELETE CASCADE,
+     group_id TEXT NOT NULL REFERENCES groups (id) ON DELETE CASCADE,
+     PRIMARY KEY (ip_group_id, group_id)
+   );
+   CREATE TABLE devices (
+     id TEXT PRIMARY KEY,
+     person_id TEXT NOT NULL REFERENCES people (id) ON DELETE CASCADE,
+     name TEXT NOT NULL,
+     serial TEXT NOT NULL UNIQUE,
+     vpn_ip TEXT NOT NULL,
+     cert TEXT NOT NULL,
+     not_after TEXT NOT NULL,
+     created_at TEXT NOT NULL,
+     revoked_at TEXT
+   );
+   CREATE UNIQUE INDEX devices_active_ip ON devices (vpn_ip) WHERE revoked_at IS NULL;
+   CREATE TABLE server_certs (server_id TEXT PRIMARY KEY, serial TEXT NOT NULL, cert TEXT NOT NULL, key TEXT NOT NULL, not_after TEXT NOT NULL);
+   -- Revocations outlive the devices they revoke, so a deleted person's certificates stay revoked.
+   CREATE TABLE revocations (serial TEXT PRIMARY KEY, revoked_at TEXT NOT NULL)`,
 ];
 
 /** Opens the product's single SQLite file in WAL mode (ADR 0011) and migrates it forward. */

@@ -1,20 +1,16 @@
-import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createApp } from "./app.ts";
-import { openDb } from "./db.ts";
+import { SERVER_TOKEN, startApp } from "./test-app.ts";
 
-let server: Server;
+let app: Awaited<ReturnType<typeof startApp>>;
 let base: string;
-const TOKEN = "test-token";
+const TOKEN = SERVER_TOKEN;
 
 beforeAll(async () => {
-  server = createServer(createApp({ db: openDb(":memory:"), version: "1.2.3", serverToken: TOKEN }));
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  base = `http://localhost:${(server.address() as AddressInfo).port}`;
+  app = await startApp({ version: "1.2.3" });
+  base = app.base;
 });
 
-afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
+afterAll(() => app.close());
 
 const heartbeat = (body: unknown, token = TOKEN) =>
   fetch(`${base}/api/v1/servers/heartbeat`, {
@@ -65,7 +61,7 @@ describe("server heartbeat", () => {
   it("records the server and lists it", async () => {
     expect((await heartbeat({ id: "edge-1", version: "1.2.3", openvpnRunning: true })).status).toBe(202);
     expect((await heartbeat({ id: "edge-1-tcp", version: "1.2.3", listen: "tcp/443", openvpnRunning: true })).status).toBe(202);
-    const { servers } = (await (await fetch(`${base}/api/v1/servers`)).json()) as { servers: unknown[] };
+    const { servers } = (await (await app.admin("/api/v1/servers")).json()) as { servers: unknown[] };
     expect(servers).toEqual([
       expect.objectContaining({ id: "edge-1", version: "1.2.3", listen: null, openvpnRunning: true }),
       expect.objectContaining({ id: "edge-1-tcp", listen: "tcp/443" }),

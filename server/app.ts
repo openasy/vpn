@@ -5,12 +5,19 @@ import { extname, join, normalize } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { log } from "./log.ts";
 import { countRequest, renderMetrics } from "./metrics.ts";
+import { VpnError, type Vpn } from "./vpn.ts";
 
 export interface AppOptions {
   db: DatabaseSync;
+  vpn: Vpn;
   version: string;
-  /** Shared token the vpn-server agent sends; heartbeats are refused when unset. */
+  /** Shared token the vpn-server agents send; their requests are refused when unset. */
   serverToken?: string;
+  /**
+   * Token for the management API until sign-in exists (ADR 0002). Management requests are
+   * refused when it is unset.
+   */
+  adminToken?: string;
   /** Built web UI; omit to run headless (ADR 0018). */
   webDir?: string;
   /** Built API reference (Swagger UI), served at /api/docs. */
@@ -25,6 +32,7 @@ interface Server {
   /** "udp/1194", "tcp/443"; null when the server's config file decides. */
   listen: string | null;
   openvpnRunning: boolean;
+  configVersion: string | null;
   lastSeen: string;
 }
 
@@ -46,14 +54,14 @@ const SECURITY_HEADERS = {
   "content-security-policy": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'",
 };
 
-function send(res: ServerResponse, status: number, body: string | Buffer, type = "application/json") {
-  res.writeHead(status, { ...SECURITY_HEADERS, "content-type": type, "content-length": Buffer.byteLength(body) });
+function send(res: ServerResponse, status: number, body: string | Buffer, type = "application/json", headers: Record<string, string> = {}) {
+  res.writeHead(status, { ...SECURITY_HEADERS, ...headers, "content-type": type, "content-length": Buffer.byteLength(body) });
   res.end(body);
 }
 
-const json = (res: ServerResponse, status: number, data: unknown) => send(res, status, JSON.stringify(data));
+const json = (res: ServerResponse, status: number, data: unknown, headers?: Record<string, string>) => send(res, status, JSON.stringify(data), "application/json", headers);
 
-type ProblemCode = "invalid-token" | "invalid-json" | "invalid-body" | "version-mismatch" | "not-found" | "internal-error";
+type ProblemCode = "invalid-token" | "invalid-json" | "invalid-body" | "version-mismatch" | "not-found" | "conflict" | "not-configured" | "internal-error";
 
 const TITLES: Record<ProblemCode, string> = {
   "invalid-token": "Invalid token",
@@ -61,6 +69,8 @@ const TITLES: Record<ProblemCode, string> = {
   "invalid-body": "Invalid request body",
   "version-mismatch": "Version mismatch",
   "not-found": "Not found",
+  conflict: "Conflict",
+  "not-configured": "Not configured",
   "internal-error": "Internal error",
 };
 
@@ -68,6 +78,16 @@ const TITLES: Record<ProblemCode, string> = {
 function problem(res: ServerResponse, status: number, code: ProblemCode, detail?: string) {
   const body = { type: `https://openasy.github.io/problems/${code}`, title: TITLES[code], status, code, ...(detail && { detail }) };
   send(res, status, JSON.stringify(body), "application/problem+json");
+}
+
+class HttpProblem extends Error {
+  readonly status: number;
+  readonly code: ProblemCode;
+  constructor(status: number, code: ProblemCode, detail: string) {
+    super(detail);
+    this.status = status;
+    this.code = code;
+  }
 }
 
 /** Serves a file from dir, or returns false when the path is outside it or missing. */
@@ -82,15 +102,21 @@ async function serveFile(res: ServerResponse, dir: string, relative: string): Pr
   }
 }
 
-async function readJson(req: IncomingMessage, limit = 16 * 1024): Promise<unknown> {
+async function readJson(req: IncomingMessage, limit = 64 * 1024): Promise<Record<string, unknown>> {
   let size = 0;
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > limit) throw new Error("body too large");
+    if (size > limit) throw new HttpProblem(400, "invalid-json", "The body must be JSON, at most 64 KiB.");
     chunks.push(chunk);
   }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  try {
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+    if (body === null || typeof body !== "object" || Array.isArray(body)) throw new Error("not an object");
+    return body as Record<string, unknown>;
+  } catch {
+    throw new HttpProblem(400, "invalid-json", "The body must be a JSON object.");
+  }
 }
 
 function tokenMatches(header: string | undefined, expected: string | undefined): boolean {
@@ -100,14 +126,121 @@ function tokenMatches(header: string | undefined, expected: string | undefined):
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-export function createApp({ db, version, serverToken, webDir, docsDir, openapi }: AppOptions) {
+type Auth = "none" | "admin" | "server";
+interface Ctx {
+  req: IncomingMessage;
+  res: ServerResponse;
+  params: string[];
+  body: () => Promise<Record<string, unknown>>;
+}
+interface Route {
+  method: string;
+  /** Path pattern; `:id` matches one segment. */
+  path: string;
+  auth: Auth;
+  handle: (ctx: Ctx) => unknown;
+}
+
+export function createApp({ db, vpn, version, serverToken, adminToken, webDir, docsDir, openapi }: AppOptions) {
   const spec = openapi && JSON.stringify({ ...openapi, info: { ...(openapi.info as object), version } });
-  const listServers = db.prepare("SELECT id, version, listen, openvpn_running, last_seen FROM servers ORDER BY id");
+  const listServers = db.prepare("SELECT id, version, listen, openvpn_running, config_version, last_seen FROM servers ORDER BY id");
   const countServers = db.prepare("SELECT COUNT(*) AS n FROM servers");
   const upsertServer = db.prepare(
-    `INSERT INTO servers (id, version, listen, openvpn_running, last_seen) VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT (id) DO UPDATE SET version = excluded.version, listen = excluded.listen, openvpn_running = excluded.openvpn_running, last_seen = excluded.last_seen`,
+    `INSERT INTO servers (id, version, listen, openvpn_running, config_version, last_seen) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT (id) DO UPDATE SET version = excluded.version, listen = excluded.listen, openvpn_running = excluded.openvpn_running,
+       config_version = excluded.config_version, last_seen = excluded.last_seen`,
   );
+
+  const SERVER_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
+  const created = (res: ServerResponse, data: unknown) => (json(res, 201, data), undefined);
+  const noContent = (res: ServerResponse) => {
+    res.writeHead(204, SECURITY_HEADERS).end();
+  };
+
+  const routes: Route[] = [
+    { method: "GET", path: "/api/v1/version", auth: "none", handle: () => ({ product: "vpn-manager", version }) },
+
+    // Servers and their agents.
+    {
+      method: "GET",
+      path: "/api/v1/servers",
+      auth: "admin",
+      handle: () => {
+        const rows = listServers.all() as Array<{ id: string; version: string; listen: string | null; openvpn_running: number; config_version: string | null; last_seen: string }>;
+        const servers: Server[] = rows.map((r) => ({ id: r.id, version: r.version, listen: r.listen, openvpnRunning: r.openvpn_running === 1, configVersion: r.config_version, lastSeen: r.last_seen }));
+        return { servers };
+      },
+    },
+    {
+      method: "POST",
+      path: "/api/v1/servers/heartbeat",
+      auth: "server",
+      handle: async ({ res, body }) => {
+        const { id, version: agentVersion, listen, openvpnRunning, configVersion } = (await body()) as Partial<Server>;
+        if (
+          typeof id !== "string" ||
+          !SERVER_ID.test(id) ||
+          typeof agentVersion !== "string" ||
+          typeof openvpnRunning !== "boolean" ||
+          (listen != null && (typeof listen !== "string" || !/^(udp|tcp)\/\d{1,5}$/.test(listen))) ||
+          (configVersion != null && typeof configVersion !== "string")
+        ) {
+          throw new HttpProblem(422, "invalid-body", "Expected { id, version, listen?, openvpnRunning, configVersion? }.");
+        }
+        // ADR 0019: an agent always has the same version as its product.
+        if (agentVersion !== version) throw new HttpProblem(409, "version-mismatch", `vpn-server ${agentVersion} does not match vpn-manager ${version}; install vpn-server ${version}`);
+        upsertServer.run(id, agentVersion, listen ?? null, openvpnRunning ? 1 : 0, configVersion ?? null, new Date().toISOString());
+        json(res, 202, { status: "accepted" });
+      },
+    },
+    {
+      // The agent pulls what its server must run (ADR 0022, 0023). ETag lets it skip unchanged configs.
+      method: "GET",
+      path: "/api/v1/servers/:id/config",
+      auth: "server",
+      handle: async ({ req, res, params }) => {
+        const id = params[0]!;
+        if (!SERVER_ID.test(id)) throw new HttpProblem(422, "invalid-body", "Server ids are lowercase letters, digits and dashes.");
+        const config = await vpn.serverConfig(id);
+        const etag = `"${config.version}"`;
+        if (req.headers["if-none-match"] === etag) {
+          res.writeHead(304, { ...SECURITY_HEADERS, etag }).end();
+          return;
+        }
+        json(res, 200, config, { etag, "cache-control": "no-store" });
+      },
+    },
+
+    // People and their devices.
+    { method: "GET", path: "/api/v1/people", auth: "admin", handle: () => ({ people: vpn.listPeople() }) },
+    { method: "POST", path: "/api/v1/people", auth: "admin", handle: async ({ res, body }) => created(res, vpn.createPerson(await body())) },
+    { method: "GET", path: "/api/v1/people/:id", auth: "admin", handle: ({ params }) => vpn.person(params[0]!) },
+    { method: "PATCH", path: "/api/v1/people/:id", auth: "admin", handle: async ({ params, body }) => vpn.updatePerson(params[0]!, await body()) },
+    { method: "DELETE", path: "/api/v1/people/:id", auth: "admin", handle: ({ res, params }) => (vpn.deletePerson(params[0]!), noContent(res)) },
+    { method: "GET", path: "/api/v1/people/:id/devices", auth: "admin", handle: ({ params }) => ({ devices: vpn.listDevices(params[0]!) }) },
+    { method: "POST", path: "/api/v1/people/:id/devices", auth: "admin", handle: async ({ res, params, body }) => created(res, await vpn.createDevice(params[0]!, await body())) },
+    { method: "DELETE", path: "/api/v1/devices/:id", auth: "admin", handle: ({ params }) => vpn.revokeDevice(params[0]!) },
+
+    // Groups and IP groups.
+    { method: "GET", path: "/api/v1/groups", auth: "admin", handle: () => ({ groups: vpn.listGroups() }) },
+    { method: "POST", path: "/api/v1/groups", auth: "admin", handle: async ({ res, body }) => created(res, vpn.createGroup(await body())) },
+    { method: "DELETE", path: "/api/v1/groups/:id", auth: "admin", handle: ({ res, params }) => (vpn.deleteGroup(params[0]!), noContent(res)) },
+    { method: "GET", path: "/api/v1/ip-groups", auth: "admin", handle: () => ({ ipGroups: vpn.listIpGroups() }) },
+    { method: "POST", path: "/api/v1/ip-groups", auth: "admin", handle: async ({ res, body }) => created(res, vpn.createIpGroup(await body())) },
+    { method: "GET", path: "/api/v1/ip-groups/:id", auth: "admin", handle: ({ params }) => vpn.ipGroup(params[0]!) },
+    { method: "PATCH", path: "/api/v1/ip-groups/:id", auth: "admin", handle: async ({ params, body }) => vpn.updateIpGroup(params[0]!, await body()) },
+    { method: "DELETE", path: "/api/v1/ip-groups/:id", auth: "admin", handle: ({ res, params }) => (vpn.deleteIpGroup(params[0]!), noContent(res)) },
+  ];
+
+  const compiled = routes.map((r) => ({ ...r, re: new RegExp(`^${r.path.replace(/:id/g, "([^/]+)")}$`) }));
+
+  function authorize(req: IncomingMessage, auth: Auth) {
+    if (auth === "none") return;
+    const expected = auth === "admin" ? adminToken : serverToken;
+    const name = auth === "admin" ? "VPN_ADMIN_TOKEN" : "VPN_SERVER_TOKEN";
+    if (!expected) throw new HttpProblem(503, "not-configured", `Set ${name} on vpn-manager to use this endpoint.`);
+    if (!tokenMatches(req.headers.authorization, expected)) throw new HttpProblem(401, "invalid-token", `Send ${name} as a bearer token.`);
+  }
 
   async function route(req: IncomingMessage, res: ServerResponse): Promise<string> {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -143,40 +276,19 @@ export function createApp({ db, version, serverToken, webDir, docsDir, openapi }
       return "/api/docs";
     }
 
-    if (path === "/api/v1/version" && req.method === "GET") {
-      return (json(res, 200, { product: "vpn-manager", version }), "/api/v1/version");
-    }
-
-    if (path === "/api/v1/servers" && req.method === "GET") {
-      const rows = listServers.all() as { id: string; version: string; listen: string | null; openvpn_running: number; last_seen: string }[];
-      const servers: Server[] = rows.map((r) => ({ id: r.id, version: r.version, listen: r.listen, openvpnRunning: r.openvpn_running === 1, lastSeen: r.last_seen }));
-      return (json(res, 200, { servers }), "/api/v1/servers");
-    }
-
-    if (path === "/api/v1/servers/heartbeat" && req.method === "POST") {
-      if (!tokenMatches(req.headers.authorization, serverToken)) return (problem(res, 401, "invalid-token", "Send the VPN_SERVER_TOKEN as a bearer token."), path);
-      let body: unknown;
+    for (const r of compiled) {
+      const m = path.match(r.re);
+      if (!m || r.method !== req.method) continue;
       try {
-        body = await readJson(req);
-      } catch {
-        return (problem(res, 400, "invalid-json", "The body must be JSON, at most 16 KiB."), path);
+        authorize(req, r.auth);
+        const params = m.slice(1).map(decodeURIComponent);
+        const result = await r.handle({ req, res, params, body: () => readJson(req) });
+        if (!res.headersSent && result !== undefined) json(res, 200, result);
+      } catch (err) {
+        if (err instanceof HttpProblem || err instanceof VpnError) problem(res, err.status, err.code, err.message);
+        else throw err;
       }
-      const { id, version: agentVersion, listen, openvpnRunning } = (body ?? {}) as Partial<Server>;
-      if (
-        typeof id !== "string" ||
-        !/^[a-z0-9][a-z0-9-]{0,62}$/.test(id) ||
-        typeof agentVersion !== "string" ||
-        typeof openvpnRunning !== "boolean" ||
-        (listen != null && (typeof listen !== "string" || !/^(udp|tcp)\/\d{1,5}$/.test(listen)))
-      ) {
-        return (problem(res, 422, "invalid-body", "Expected { id, version, listen?, openvpnRunning }."), path);
-      }
-      // ADR 0019: an agent always has the same version as its product.
-      if (agentVersion !== version) {
-        return (problem(res, 409, "version-mismatch", `vpn-server ${agentVersion} does not match vpn-manager ${version}; install vpn-server ${version}`), path);
-      }
-      upsertServer.run(id, agentVersion, listen ?? null, openvpnRunning ? 1 : 0, new Date().toISOString());
-      return (json(res, 202, { status: "accepted" }), path);
+      return r.path;
     }
 
     if (path.startsWith("/api/")) return (problem(res, 404, "not-found"), "/api/*");

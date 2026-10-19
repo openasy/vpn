@@ -1,28 +1,36 @@
 # VPN: the manager (API and web UI) plus OpenVPN server agents on the same host.
 # Each vpn-server listens on one protocol and port; run one per port you need.
-# Set VPN_SERVER_TOKEN to a long random value, for example: openssl rand -hex 32
+#
+#   export VPN_SERVER_TOKEN=$(openssl rand -hex 32) VPN_ADMIN_TOKEN=$(openssl rand -hex 32)
+#   export VPN_PUBLIC_HOST=vpn.example.com   # the name or IP clients connect to
+#   docker compose up -d
+#
+# This release has no sign-in yet and keeps the CA key unencrypted: use it only for testing.
 services:
   vpn-manager:
-    image: ghcr.io/openasy/vpn-manager:0.1.0
+    image: ghcr.io/openasy/vpn-manager:0.2.0
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"   # UI and API; put a TLS proxy in front to reach it from elsewhere
     volumes:
-      - vpn-manager-data:/data   # SQLite database and settings
+      - vpn-manager-data:/data   # SQLite database, CA and settings
     environment:
       VPN_SERVER_TOKEN: ${VPN_SERVER_TOKEN:?set VPN_SERVER_TOKEN}
+      VPN_ADMIN_TOKEN: ${VPN_ADMIN_TOKEN:?set VPN_ADMIN_TOKEN}
+      VPN_PUBLIC_HOST: ${VPN_PUBLIC_HOST:?set VPN_PUBLIC_HOST}
+      VPN_NETWORK: 10.8.0.0/24
 
   vpn-server:
-    image: ghcr.io/openasy/vpn-server:0.1.0
+    image: ghcr.io/openasy/vpn-server:0.2.0
     restart: unless-stopped
     cap_add:
       - NET_ADMIN
     devices:
       - /dev/net/tun
+    sysctls:
+      net.ipv4.ip_forward: 1   # lets clients reach the networks behind this host
     ports:
       - "1194:1194/udp"
-    volumes:
-      - ./openvpn:/etc/openvpn:ro   # server.conf, keys and certificates
     environment:
       VPN_MANAGER_URL: http://vpn-manager:8080
       VPN_SERVER_TOKEN: ${VPN_SERVER_TOKEN:?set VPN_SERVER_TOKEN}
@@ -33,18 +41,18 @@ services:
       - vpn-manager
 
   # The same server on TCP 443, for networks that block everything except HTTPS.
-  # Clients use "proto tcp-client" and "remote <host> 443". Remove it if you do not need it.
+  # Client configs list it after UDP, so clients fall back to it. Remove it if you do not need it.
   vpn-server-tcp:
-    image: ghcr.io/openasy/vpn-server:0.1.0
+    image: ghcr.io/openasy/vpn-server:0.2.0
     restart: unless-stopped
     cap_add:
       - NET_ADMIN
     devices:
       - /dev/net/tun
+    sysctls:
+      net.ipv4.ip_forward: 1
     ports:
       - "443:443/tcp"
-    volumes:
-      - ./openvpn:/etc/openvpn:ro
     environment:
       VPN_MANAGER_URL: http://vpn-manager:8080
       VPN_SERVER_TOKEN: ${VPN_SERVER_TOKEN:?set VPN_SERVER_TOKEN}

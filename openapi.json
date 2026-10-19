@@ -2,26 +2,763 @@
   "openapi": "3.1.1",
   "info": {
     "title": "OpenAsy VPN manager API",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "summary": "Servers, users and access for OpenVPN.",
-    "description": "Every screen of vpn-manager uses this API, and so can your scripts (ADR 0014). Within `/api/v1` changes are additive only; anything removed is deprecated first (ADR 0024). Errors use Problem Details (RFC 9457).",
-    "license": { "name": "AGPL-3.0-only", "identifier": "AGPL-3.0-only" }
+    "description": "Every screen of vpn-manager uses this API, and so can your scripts (ADR 0014). Within `/api/v1` changes are additive only; anything removed is deprecated first (ADR 0024). Errors use Problem Details (RFC 9457).\n\nUntil sign-in exists (ADR 0002), management endpoints take `VPN_ADMIN_TOKEN` as a bearer token and agents take `VPN_SERVER_TOKEN`. Use this release only for testing.",
+    "license": {
+      "name": "AGPL-3.0-only",
+      "identifier": "AGPL-3.0-only"
+    }
   },
-  "servers": [{ "url": "/", "description": "This vpn-manager" }],
+  "servers": [
+    {
+      "url": "/",
+      "description": "This vpn-manager"
+    }
+  ],
   "tags": [
-    { "name": "Servers", "description": "OpenVPN servers run by vpn-server agents." },
-    { "name": "Product", "description": "Version and health of this vpn-manager." }
+    {
+      "name": "People",
+      "description": "People who use the VPN, and their devices."
+    },
+    {
+      "name": "Access",
+      "description": "Groups of people, and IP groups: the networks each group may reach."
+    },
+    {
+      "name": "Servers",
+      "description": "OpenVPN servers run by vpn-server agents."
+    },
+    {
+      "name": "Product",
+      "description": "Version and health of this vpn-manager."
+    }
   ],
   "paths": {
-    "/api/v1/version": {
+    "/api/v1/people": {
       "get": {
-        "operationId": "getVersion",
-        "tags": ["Product"],
-        "summary": "Product and version",
+        "operationId": "listPeople",
+        "tags": [
+          "People"
+        ],
+        "summary": "List people",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
         "responses": {
           "200": {
-            "description": "The running product and its version.",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Version" } } }
+            "description": "Everyone, by name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createPerson",
+        "tags": [
+          "People"
+        ],
+        "summary": "Add a person",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewPerson"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Added, active.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Person"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/people/{id}": {
+      "get": {
+        "operationId": "getPerson",
+        "tags": [
+          "People"
+        ],
+        "summary": "Get a person",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Person id.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The person.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Person"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updatePerson",
+        "tags": [
+          "People"
+        ],
+        "summary": "Change a person",
+        "description": "Suspending removes their devices from every server at the next config pull; activating brings them back.",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Person id.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PersonChange"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Person"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deletePerson",
+        "tags": [
+          "People"
+        ],
+        "summary": "Delete a person",
+        "description": "Revokes all their devices first; the revocations stay in the CRL.",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Person id.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/people/{id}/devices": {
+      "get": {
+        "operationId": "listDevices",
+        "tags": [
+          "People"
+        ],
+        "summary": "List a person's devices",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Person id.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Devices, oldest first, including revoked ones.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createDevice",
+        "tags": [
+          "People"
+        ],
+        "summary": "Add a device",
+        "description": "Issues a certificate and a fixed VPN address, and returns the client config with the device's private key. The key is not stored: this is the only time it is shown.",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Person id.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewDevice"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The device and its client config.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewDeviceResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/devices/{id}": {
+      "delete": {
+        "operationId": "revokeDevice",
+        "tags": [
+          "People"
+        ],
+        "summary": "Revoke a device",
+        "description": "Adds its certificate to the CRL and removes it from every server at the next config pull.",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Device id.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Device"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/groups": {
+      "get": {
+        "operationId": "listGroups",
+        "tags": [
+          "Access"
+        ],
+        "summary": "List groups",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Groups, by name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createGroup",
+        "tags": [
+          "Access"
+        ],
+        "summary": "Add a group",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewGroup"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Added.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Group"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/groups/{id}": {
+      "delete": {
+        "operationId": "deleteGroup",
+        "tags": [
+          "Access"
+        ],
+        "summary": "Delete a group",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Group id.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/ip-groups": {
+      "get": {
+        "operationId": "listIpGroups",
+        "tags": [
+          "Access"
+        ],
+        "summary": "List IP groups",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "IP groups, by name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpGroupList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createIpGroup",
+        "tags": [
+          "Access"
+        ],
+        "summary": "Add an IP group",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewIpGroup"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Added.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/ip-groups/{id}": {
+      "get": {
+        "operationId": "getIpGroup",
+        "tags": [
+          "Access"
+        ],
+        "summary": "Get an IP group",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "IP group id.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The IP group.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpGroup"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateIpGroup",
+        "tags": [
+          "Access"
+        ],
+        "summary": "Change an IP group",
+        "description": "Lists you send replace the current ones.",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "IP group id.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpGroupChange"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteIpGroup",
+        "tags": [
+          "Access"
+        ],
+        "summary": "Delete an IP group",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "IP group id.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
           }
         }
       }
@@ -29,68 +766,237 @@
     "/api/v1/servers": {
       "get": {
         "operationId": "listServers",
-        "tags": ["Servers"],
+        "tags": [
+          "Servers"
+        ],
         "summary": "List VPN servers",
         "description": "Every vpn-server agent that has reported to this manager, with its last heartbeat.",
         "responses": {
           "200": {
             "description": "Known servers, ordered by id.",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ServerList" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ]
       }
     },
     "/api/v1/servers/heartbeat": {
       "post": {
         "operationId": "sendHeartbeat",
-        "tags": ["Servers"],
+        "tags": [
+          "Servers"
+        ],
         "summary": "Report a server's state",
         "description": "Called by vpn-server every 15 seconds. The agent must have the same version as the manager (ADR 0019).",
-        "security": [{ "serverToken": [] }],
+        "security": [
+          {
+            "serverToken": []
+          }
+        ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Heartbeat" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Heartbeat"
+              }
+            }
+          }
         },
         "responses": {
           "202": {
             "description": "Recorded.",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Accepted" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Accepted"
+                }
+              }
+            }
           },
-          "400": { "$ref": "#/components/responses/Problem" },
-          "401": { "$ref": "#/components/responses/Problem" },
-          "409": { "$ref": "#/components/responses/Problem" },
-          "422": { "$ref": "#/components/responses/Problem" }
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/servers/{id}/config": {
+      "get": {
+        "operationId": "getServerConfig",
+        "tags": [
+          "Servers"
+        ],
+        "summary": "What a server must run",
+        "description": "Pulled by vpn-server. Issues the server's certificate on first use. Send the last `ETag` in `If-None-Match` to get 304 when nothing changed. Contains the server's private key.",
+        "security": [
+          {
+            "serverToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Server id, for example edge-1.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The desired state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerConfig"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The config version, quoted."
+              }
+            }
+          },
+          "304": {
+            "description": "Unchanged since the given ETag."
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
+      }
+    },
+    "/api/v1/version": {
+      "get": {
+        "operationId": "getVersion",
+        "tags": [
+          "Product"
+        ],
+        "summary": "Product and version",
+        "responses": {
+          "200": {
+            "description": "The running product and its version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Version"
+                }
+              }
+            }
+          }
         }
       }
     },
     "/healthz": {
       "get": {
         "operationId": "liveness",
-        "tags": ["Product"],
+        "tags": [
+          "Product"
+        ],
         "summary": "Liveness",
         "responses": {
-          "200": { "description": "The process is running.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Status" } } } }
+          "200": {
+            "description": "The process is running.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Status"
+                }
+              }
+            }
+          }
         }
       }
     },
     "/readyz": {
       "get": {
         "operationId": "readiness",
-        "tags": ["Product"],
+        "tags": [
+          "Product"
+        ],
         "summary": "Readiness",
         "responses": {
-          "200": { "description": "Ready to serve.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Status" } } } },
-          "503": { "description": "The database is unavailable.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Status" } } } }
+          "200": {
+            "description": "Ready to serve.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Status"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The database is unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Status"
+                }
+              }
+            }
+          }
         }
       }
     },
     "/metrics": {
       "get": {
         "operationId": "metrics",
-        "tags": ["Product"],
+        "tags": [
+          "Product"
+        ],
         "summary": "Prometheus metrics",
         "responses": {
-          "200": { "description": "Metrics in the Prometheus text format.", "content": { "text/plain": { "schema": { "type": "string" } } } }
+          "200": {
+            "description": "Metrics in the Prometheus text format.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
         }
       }
     }
@@ -100,85 +1006,730 @@
       "serverToken": {
         "type": "http",
         "scheme": "bearer",
-        "description": "The `VPN_SERVER_TOKEN` shared with vpn-server agents."
+        "description": "`VPN_SERVER_TOKEN`, shared with vpn-server agents."
+      },
+      "adminToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "`VPN_ADMIN_TOKEN`, until sign-in exists (ADR 0002)."
       }
     },
     "responses": {
       "Problem": {
         "description": "The request was refused. `code` is stable; `detail` says what to do.",
-        "content": { "application/problem+json": { "schema": { "$ref": "#/components/schemas/Problem" } } }
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
       }
     },
     "schemas": {
       "Version": {
         "type": "object",
-        "required": ["product", "version"],
+        "required": [
+          "product",
+          "version"
+        ],
         "properties": {
-          "product": { "const": "vpn-manager" },
-          "version": { "type": "string", "description": "SemVer of this release.", "examples": ["0.1.0"] }
+          "product": {
+            "const": "vpn-manager"
+          },
+          "version": {
+            "type": "string",
+            "description": "SemVer of this release.",
+            "examples": [
+              "0.1.0"
+            ]
+          }
         }
       },
       "Server": {
         "type": "object",
-        "required": ["id", "version", "listen", "openvpnRunning", "lastSeen"],
+        "required": [
+          "id",
+          "version",
+          "listen",
+          "openvpnRunning",
+          "lastSeen",
+          "configVersion"
+        ],
         "properties": {
-          "id": { "$ref": "#/components/schemas/ServerId" },
-          "version": { "type": "string", "examples": ["0.1.0"] },
-          "listen": { "$ref": "#/components/schemas/Listen" },
-          "openvpnRunning": { "type": "boolean" },
-          "lastSeen": { "type": "string", "format": "date-time" }
+          "id": {
+            "$ref": "#/components/schemas/ServerId"
+          },
+          "version": {
+            "type": "string",
+            "examples": [
+              "0.1.0"
+            ]
+          },
+          "listen": {
+            "$ref": "#/components/schemas/Listen"
+          },
+          "openvpnRunning": {
+            "type": "boolean"
+          },
+          "lastSeen": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "configVersion": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Version of the config the agent applies; compare with GET /api/v1/servers/{id}/config."
+          }
         }
       },
       "ServerList": {
         "type": "object",
-        "required": ["servers"],
-        "properties": { "servers": { "type": "array", "items": { "$ref": "#/components/schemas/Server" } } }
+        "required": [
+          "servers"
+        ],
+        "properties": {
+          "servers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Server"
+            }
+          }
+        }
       },
       "ServerId": {
         "type": "string",
         "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
         "description": "Lowercase letters, digits and dashes.",
-        "examples": ["edge-1"]
+        "examples": [
+          "edge-1"
+        ]
       },
       "Listen": {
-        "type": ["string", "null"],
+        "type": [
+          "string",
+          "null"
+        ],
         "pattern": "^(udp|tcp)/\\d{1,5}$",
         "description": "Protocol and port the server listens on; null when its config file decides.",
-        "examples": ["udp/1194", "tcp/443"]
+        "examples": [
+          "udp/1194",
+          "tcp/443"
+        ]
       },
       "Heartbeat": {
         "type": "object",
-        "required": ["id", "version", "openvpnRunning"],
+        "required": [
+          "id",
+          "version",
+          "openvpnRunning"
+        ],
         "properties": {
-          "id": { "$ref": "#/components/schemas/ServerId" },
-          "version": { "type": "string", "examples": ["0.1.0"] },
-          "listen": { "$ref": "#/components/schemas/Listen" },
-          "openvpnRunning": { "type": "boolean" }
+          "id": {
+            "$ref": "#/components/schemas/ServerId"
+          },
+          "version": {
+            "type": "string",
+            "examples": [
+              "0.1.0"
+            ]
+          },
+          "listen": {
+            "$ref": "#/components/schemas/Listen"
+          },
+          "openvpnRunning": {
+            "type": "boolean"
+          },
+          "configVersion": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Version of the config the agent applied."
+          }
         }
       },
       "Accepted": {
         "type": "object",
-        "required": ["status"],
-        "properties": { "status": { "const": "accepted" } }
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "const": "accepted"
+          }
+        }
       },
       "Status": {
         "type": "object",
-        "required": ["status"],
-        "properties": { "status": { "type": "string", "examples": ["ok", "ready"] } }
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "examples": [
+              "ok",
+              "ready"
+            ]
+          }
+        }
       },
       "Problem": {
         "type": "object",
         "description": "RFC 9457 Problem Details.",
-        "required": ["type", "title", "status", "code"],
+        "required": [
+          "type",
+          "title",
+          "status",
+          "code"
+        ],
         "properties": {
-          "type": { "type": "string", "format": "uri-reference", "examples": ["https://openasy.github.io/problems/version-mismatch"] },
-          "title": { "type": "string", "examples": ["Version mismatch"] },
-          "status": { "type": "integer", "minimum": 400, "maximum": 599 },
-          "detail": { "type": "string", "examples": ["vpn-server 0.0.9 does not match vpn-manager 0.1.0; install vpn-server 0.1.0"] },
+          "type": {
+            "type": "string",
+            "format": "uri-reference",
+            "examples": [
+              "https://openasy.github.io/problems/version-mismatch"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "examples": [
+              "Version mismatch"
+            ]
+          },
+          "status": {
+            "type": "integer",
+            "minimum": 400,
+            "maximum": 599
+          },
+          "detail": {
+            "type": "string",
+            "examples": [
+              "vpn-server 0.0.9 does not match vpn-manager 0.1.0; install vpn-server 0.1.0"
+            ]
+          },
           "code": {
             "type": "string",
             "description": "Stable identifier to match on in code.",
-            "enum": ["invalid-token", "invalid-json", "invalid-body", "version-mismatch", "not-found", "internal-error"]
+            "enum": [
+              "invalid-token",
+              "invalid-json",
+              "invalid-body",
+              "version-mismatch",
+              "not-found",
+              "conflict",
+              "not-configured",
+              "internal-error"
+            ]
+          }
+        }
+      },
+      "Person": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "email",
+          "status",
+          "groups",
+          "devices",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Opaque id.",
+            "examples": [
+              "3f2b8c1e-5d4a-4f6b-9c2e-7a1d0e9b8f64"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "examples": [
+              "Dana Kim"
+            ]
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "examples": [
+              "dana@example.com"
+            ]
+          },
+          "status": {
+            "enum": [
+              "active",
+              "suspended"
+            ]
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Group names."
+          },
+          "devices": {
+            "type": "integer",
+            "description": "Devices that are not revoked."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PersonList": {
+        "type": "object",
+        "required": [
+          "people"
+        ],
+        "properties": {
+          "people": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Person"
+            }
+          }
+        }
+      },
+      "NewPerson": {
+        "type": "object",
+        "required": [
+          "name",
+          "email"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Group names."
+          }
+        }
+      },
+      "PersonChange": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "suspended"
+            ]
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Group names."
+          }
+        }
+      },
+      "Device": {
+        "type": "object",
+        "required": [
+          "id",
+          "personId",
+          "name",
+          "vpnIp",
+          "notAfter",
+          "createdAt",
+          "revokedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Opaque id; also the certificate's common name.",
+            "examples": [
+              "3f2b8c1e-5d4a-4f6b-9c2e-7a1d0e9b8f64"
+            ]
+          },
+          "personId": {
+            "type": "string",
+            "description": "Opaque id.",
+            "examples": [
+              "3f2b8c1e-5d4a-4f6b-9c2e-7a1d0e9b8f64"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "examples": [
+              "Work laptop"
+            ]
+          },
+          "vpnIp": {
+            "type": "string",
+            "format": "ipv4",
+            "examples": [
+              "10.8.0.2"
+            ]
+          },
+          "notAfter": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the certificate expires."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revokedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "DeviceList": {
+        "type": "object",
+        "required": [
+          "devices"
+        ],
+        "properties": {
+          "devices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Device"
+            }
+          }
+        }
+      },
+      "NewDevice": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "examples": [
+              "Work laptop"
+            ]
+          }
+        }
+      },
+      "NewDeviceResult": {
+        "type": "object",
+        "required": [
+          "device",
+          "ovpn"
+        ],
+        "properties": {
+          "device": {
+            "$ref": "#/components/schemas/Device"
+          },
+          "ovpn": {
+            "type": "string",
+            "description": "OpenVPN client config with the private key. Save it as a .ovpn file; it is not shown again."
+          }
+        }
+      },
+      "Group": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "people"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Opaque id.",
+            "examples": [
+              "3f2b8c1e-5d4a-4f6b-9c2e-7a1d0e9b8f64"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "examples": [
+              "Backend engineers"
+            ]
+          },
+          "people": {
+            "type": "integer"
+          }
+        }
+      },
+      "GroupList": {
+        "type": "object",
+        "required": [
+          "groups"
+        ],
+        "properties": {
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Group"
+            }
+          }
+        }
+      },
+      "NewGroup": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 100
+          }
+        }
+      },
+      "IpNetwork": {
+        "type": "object",
+        "required": [
+          "cidr",
+          "ports",
+          "note"
+        ],
+        "properties": {
+          "cidr": {
+            "type": "string",
+            "description": "IPv4 network with host bits zero.",
+            "examples": [
+              "172.16.20.0/24"
+            ]
+          },
+          "ports": {
+            "type": "string",
+            "description": "Ports for the firewall rules, or any.",
+            "examples": [
+              "tcp/5432, 6432",
+              "any"
+            ]
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      },
+      "IpGroup": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "fullTunnel",
+          "networks",
+          "allowedGroups"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Opaque id.",
+            "examples": [
+              "3f2b8c1e-5d4a-4f6b-9c2e-7a1d0e9b8f64"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "examples": [
+              "Production databases"
+            ]
+          },
+          "fullTunnel": {
+            "type": "boolean",
+            "description": "Send all of a member's traffic through the VPN."
+          },
+          "networks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNetwork"
+            }
+          },
+          "allowedGroups": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Group names."
+          }
+        }
+      },
+      "IpGroupList": {
+        "type": "object",
+        "required": [
+          "ipGroups"
+        ],
+        "properties": {
+          "ipGroups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpGroup"
+            }
+          }
+        }
+      },
+      "NewIpGroup": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "fullTunnel": {
+            "type": "boolean"
+          },
+          "networks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "cidr"
+              ],
+              "properties": {
+                "cidr": {
+                  "type": "string"
+                },
+                "ports": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "allowedGroups": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Group names."
+          }
+        }
+      },
+      "IpGroupChange": {
+        "type": "object",
+        "properties": {
+          "fullTunnel": {
+            "type": "boolean"
+          },
+          "networks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "cidr"
+              ],
+              "properties": {
+                "cidr": {
+                  "type": "string"
+                },
+                "ports": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "allowedGroups": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Group names."
+          }
+        }
+      },
+      "ServerConfig": {
+        "type": "object",
+        "required": [
+          "version",
+          "network",
+          "ca",
+          "cert",
+          "key",
+          "crl",
+          "tlsCrypt",
+          "clients"
+        ],
+        "properties": {
+          "version": {
+            "type": "string",
+            "description": "Changes whenever anything below changes."
+          },
+          "network": {
+            "type": "string",
+            "examples": [
+              "10.8.0.0/24"
+            ]
+          },
+          "ca": {
+            "type": "string",
+            "description": "CA certificate, PEM."
+          },
+          "cert": {
+            "type": "string",
+            "description": "This server's certificate, PEM."
+          },
+          "key": {
+            "type": "string",
+            "description": "This server's private key, PEM."
+          },
+          "crl": {
+            "type": "string",
+            "description": "Revocation list, PEM."
+          },
+          "tlsCrypt": {
+            "type": "string",
+            "description": "OpenVPN tls-crypt key."
+          },
+          "clients": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "cn",
+                "ip",
+                "routes",
+                "fullTunnel"
+              ],
+              "properties": {
+                "cn": {
+                  "type": "string",
+                  "description": "Device id, the certificate's common name."
+                },
+                "ip": {
+                  "type": "string",
+                  "format": "ipv4"
+                },
+                "routes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Networks pushed to the client."
+                },
+                "fullTunnel": {
+                  "type": "boolean"
+                }
+              }
+            }
           }
         }
       }
