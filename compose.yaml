@@ -3,14 +3,14 @@
 #
 #   export VPN_SERVER_TOKEN=$(openssl rand -hex 32)
 #   export VPN_PUBLIC_HOST=vpn.example.com   # the name or IP clients connect to
-#   openssl rand -hex 32 > openasy-kek       # encrypts sign-in secrets (ADR 0021); keep it with your backups
+#   openssl rand -hex 32 > openasy-kek       # encrypts the CA key and sign-in secrets (ADR 0021)
 #   docker compose up -d
 #   docker compose logs vpn | grep 'no owner yet'   # the one-time link that creates the owner account
 #
-# The CA key is still stored unencrypted in the database: protect the volume and its backups.
+# Keep openasy-kek apart from the volume, and with your backups: without it the CA cannot be opened.
 services:
   vpn:
-    image: ghcr.io/openasy/vpn:0.4.0
+    image: ghcr.io/openasy/vpn:0.5.0
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"   # UI and API; put a TLS proxy in front to reach it from elsewhere
@@ -26,7 +26,7 @@ services:
       VPN_NETWORK: 10.8.0.0/24
 
   vpn-server:
-    image: ghcr.io/openasy/vpn-server:0.4.0
+    image: ghcr.io/openasy/vpn-server:0.5.0
     restart: unless-stopped
     cap_add:
       - NET_ADMIN
@@ -48,7 +48,7 @@ services:
   # The same server on TCP 443, for networks that block everything except HTTPS.
   # Client configs list it after UDP, so clients fall back to it. Remove it if you do not need it.
   vpn-server-tcp:
-    image: ghcr.io/openasy/vpn-server:0.4.0
+    image: ghcr.io/openasy/vpn-server:0.5.0
     restart: unless-stopped
     cap_add:
       - NET_ADMIN

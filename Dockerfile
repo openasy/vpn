@@ -13,6 +13,7 @@ WORKDIR /app
 COPY --from=build /app/package.json /app/openapi.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/server ./server
+COPY --from=build /app/cli/openasy-vpn.ts ./cli/
 COPY --from=build /app/dist/web ./dist/web
 COPY --from=build /app/dist/docs ./dist/docs
 COPY --from=build --chown=nonroot:nonroot /out/data /data

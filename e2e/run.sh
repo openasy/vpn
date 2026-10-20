@@ -17,7 +17,8 @@ docker run -d --name e2e-target --network e2e-int --ip 172.30.20.10 vpn-server:d
   const h = require('http');
   h.createServer((q, s) => s.end('hello from the internal network')).listen(80);
   h.createServer((q, s) => s.end('port 8081 should be blocked')).listen(8081);" >/dev/null
-docker run -d --name e2e-vpn --network e2e-pub -p 18090:8080 -e VPN_SERVER_TOKEN=server-e2e -e VPN_ADMIN_TOKEN=admin-e2e -e VPN_PUBLIC_HOST=vpn.test vpn:dev >/dev/null
+openssl rand -hex 32 > "$D/kek"
+docker run -d --name e2e-vpn --network e2e-pub -p 18090:8080 -v "$D/kek:/run/secrets/openasy-kek:ro" -e VPN_SERVER_TOKEN=server-e2e -e VPN_ADMIN_TOKEN=admin-e2e -e VPN_PUBLIC_HOST=vpn.test vpn:dev >/dev/null
 agent() { # name proto port alias
   docker run -d --name "$1" --network e2e-pub --network-alias "$4" --cap-add NET_ADMIN --device /dev/net/tun --sysctl net.ipv4.ip_forward=1 \
     -e VPN_URL=http://e2e-vpn:8080 -e VPN_SERVER_TOKEN=server-e2e -e VPN_SERVER_ID="$1" -e OPENVPN_PROTO="$2" -e OPENVPN_PORT="$3" -e HEARTBEAT_SECONDS=2 vpn-server:dev >/dev/null
@@ -30,9 +31,12 @@ agent e2e-tcp tcp 443 vpn-tcp.test
 api -X POST localhost:18090/api/v1/groups -d '{"name":"Backend engineers"}' >/dev/null
 api -X POST localhost:18090/api/v1/ip-groups -d '{"name":"Internal","networks":[{"cidr":"172.30.20.0/24","ports":"tcp/80"}],"allowedGroups":["Backend engineers"]}' >/dev/null
 PERSON=$(api -X POST localhost:18090/api/v1/people -d '{"name":"Dana Kim","email":"dana@example.com","groups":["Backend engineers"]}' | jsonq d.id)
-api -X POST "localhost:18090/api/v1/people/$PERSON/devices" -d '{"name":"Laptop"}' > "$D/device.json"
-jsonq d.ovpn < "$D/device.json" > "$D/client.ovpn"
-DEVICE=$(jsonq d.device.id < "$D/device.json")
+[ -n "$PERSON" ] || fail "the person was not added"
+# The device is issued with the command line tool in the image, as an operator would (ADR 0014).
+cli() { docker run --rm --network e2e-pub -e VPN_URL=http://e2e-vpn:8080 -e VPN_API_TOKEN=admin-e2e vpn:dev cli/openasy-vpn.ts "$@"; }
+cli devices add dana@example.com Laptop --out - > "$D/client.ovpn" || fail "the command line tool did not issue the device"
+DEVICE=$(cli devices dana@example.com --json | jsonq 'd.devices[0].id')
+cli people | grep -q "Dana Kim" || fail "the command line tool does not list Dana Kim"
 grep -v '^remote ' "$D/client.ovpn" | sed "s#^nobind#nobind\nremote vpn-tcp.test 443 tcp-client#" > "$D/client-tcp.ovpn"
 echo "remotes in client.ovpn: $(grep '^remote ' "$D/client.ovpn" | tr '\n' ';')"
 

@@ -2,6 +2,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { clientAddresses, formatCidr, formatIp, parseCidr, parseIp, parsePorts, type Cidr } from "./net.ts";
+import type { Keyring } from "./kek.ts";
 import { crl, createCa, issue, tlsCryptKey, type Ca } from "./pki.ts";
 
 export class VpnError extends Error {
@@ -105,6 +106,8 @@ export interface VpnOptions {
   network: string;
   /** Host name or IP clients connect to; required to download a client config. */
   publicHost?: string;
+  /** Seals the CA key, the tls-crypt key and server keys in the database (ADR 0021). */
+  keyring: Keyring;
 }
 
 export function createVpn(db: DatabaseSync, opts: VpnOptions) {
@@ -115,17 +118,47 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
   const putSetting = db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value");
   const get = (key: string) => (setting.get(key) as { value: string } | undefined)?.value;
 
-  /** Creates the CA and tls-crypt key on first start. */
-  async function init() {
+  // Private keys are sealed (ADR 0021): a copy of the database or its backup does not hold them in the clear.
+  // Values written before 0.5.0 are PEM, which never starts with "v1."; init() seals them.
+  const isSealed = (v: string) => v.startsWith("v1.");
+  const open = (v: string) => (isSealed(v) ? opts.keyring.open(v).toString("utf8") : v);
+  const secret = (key: string) => open(get(key)!);
+
+  /**
+   * Creates the CA and tls-crypt key on first start, and seals keys stored in the clear by earlier versions.
+   * Returns how many it sealed. Fails when the key-encryption key is not the one the data was sealed with.
+   */
+  async function init(): Promise<{ sealed: number }> {
+    let sealed = 0;
     if (!get("ca_cert")) {
       const ca = await createCa();
       putSetting.run("ca_cert", ca.cert);
-      putSetting.run("ca_key", ca.key);
+      putSetting.run("ca_key", opts.keyring.seal(ca.key));
     }
-    if (!get("tls_crypt")) putSetting.run("tls_crypt", tlsCryptKey());
+    if (!get("tls_crypt")) putSetting.run("tls_crypt", opts.keyring.seal(tlsCryptKey()));
+    try {
+      secret("ca_key");
+    } catch {
+      throw new Error("the key-encryption key does not open the CA key: mount the key this data was sealed with");
+    }
+    db.exec("BEGIN");
+    try {
+      for (const key of ["ca_key", "tls_crypt"]) {
+        const v = get(key)!;
+        if (!isSealed(v)) (putSetting.run(key, opts.keyring.seal(v)), sealed++);
+      }
+      for (const r of db.prepare("SELECT server_id, key FROM server_certs").all() as Array<{ server_id: string; key: string }>) {
+        if (!isSealed(r.key)) (db.prepare("UPDATE server_certs SET key = ? WHERE server_id = ?").run(opts.keyring.seal(r.key), r.server_id), sealed++);
+      }
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+    return { sealed };
   }
 
-  const ca = (): Ca => ({ cert: get("ca_cert")!, key: get("ca_key")! });
+  const ca = (): Ca => ({ cert: get("ca_cert")!, key: secret("ca_key") });
 
   // ---- groups -------------------------------------------------------------
 
@@ -358,7 +391,7 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
       `<ca>\n${ca().cert.trim()}\n</ca>`,
       `<cert>\n${cert.trim()}\n</cert>`,
       `<key>\n${key.trim()}\n</key>`,
-      `<tls-crypt>\n${get("tls_crypt")!.trim()}\n</tls-crypt>`,
+      `<tls-crypt>\n${secret("tls_crypt").trim()}\n</tls-crypt>`,
       "",
     ];
     return lines.join("\n");
@@ -404,8 +437,10 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
     let row = db.prepare("SELECT cert, key FROM server_certs WHERE server_id = ?").get(serverId) as { cert: string; key: string } | undefined;
     if (!row) {
       const cert = await issue(ca(), "server", serverId);
-      db.prepare("INSERT INTO server_certs (server_id, serial, cert, key, not_after) VALUES (?, ?, ?, ?, ?)").run(serverId, cert.serial, cert.cert, cert.key, cert.notAfter);
+      db.prepare("INSERT INTO server_certs (server_id, serial, cert, key, not_after) VALUES (?, ?, ?, ?, ?)").run(serverId, cert.serial, cert.cert, opts.keyring.seal(cert.key), cert.notAfter);
       row = cert;
+    } else {
+      row = { cert: row.cert, key: open(row.key) };
     }
     const revoked = db.prepare("SELECT serial, revoked_at AS at FROM revocations ORDER BY serial").all() as Array<{ serial: string; at: string }>;
     // A CRL is signed with a timestamp, so it is cached to keep `version` stable between pulls. It is signed again
@@ -418,7 +453,7 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
       crlPem = await crl(ca(), revoked);
       putSetting.run("crl", JSON.stringify([crlKey, Date.now(), crlPem]));
     }
-    const body = { network: opts.network, ca: ca().cert, cert: row.cert, key: row.key, crl: crlPem, tlsCrypt: get("tls_crypt")!, clients: clientRules() };
+    const body = { network: opts.network, ca: ca().cert, cert: row.cert, key: row.key, crl: crlPem, tlsCrypt: secret("tls_crypt"), clients: clientRules() };
     const version = createHash("sha256").update(JSON.stringify(body)).digest("hex").slice(0, 16);
     return { version, ...body };
   }

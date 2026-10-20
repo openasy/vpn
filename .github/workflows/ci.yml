@@ -46,7 +46,8 @@ jobs:
 
       - name: Smoke test
         run: |
-          docker run -d --name smoke -p 8080:8080 -e VPN_SERVER_TOKEN=ci vpn:ci
+          openssl rand -hex 32 > kek
+          docker run -d --name smoke -p 8080:8080 -v "$PWD/kek:/run/secrets/openasy-kek:ro" -e VPN_SERVER_TOKEN=ci vpn:ci
           for _ in $(seq 1 30); do curl -sf localhost:8080/readyz && break; sleep 1; done
           curl -sf localhost:8080/healthz
           curl -sf localhost:8080/metrics | grep -q 'openasy_build_info{product="vpn"'

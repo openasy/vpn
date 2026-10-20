@@ -7,7 +7,9 @@ VPN traffic and takes its config from `vpn` (ADR 0018).
 People sign in with an account (password plus authenticator app or passkey), with a passkey alone, or through your
 identity provider (OIDC). Each person has a role in this VPN; scripts use API tokens. See [Sign-in](#sign-in).
 
-> The CA key is still stored unencrypted in the database (ADR 0021): protect the `/data` volume and its backups.
+> The CA key, server keys and sign-in secrets are sealed with `openasy-kek` (ADR 0021). Keep that file apart from the
+> `/data` volume and with your backups: a backup without it cannot issue certificates, and vpn does not start
+> without it.
 
 ## Run
 
@@ -31,7 +33,7 @@ http://localhost:8080/api/docs/ (click *Authorize* and paste an API token).
 | `VPN_DB` | `/data/vpn.db` | SQLite file (WAL), on the `/data` volume |
 | `VPN_PUBLIC_URL` | `http://localhost:8080` | The address people open, with `https://` behind your TLS proxy. Cookies, passkeys and OIDC redirects use it |
 | `VPN_SERVER_TOKEN` | | Token the vpn-server servers send; they are refused without it |
-| `VPN_SECRETS_KEY_FILE` | `/run/secrets/openasy-kek` | 32-byte key that encrypts sign-in secrets in the database (ADR 0021) |
+| `VPN_SECRETS_KEY_FILE` | `/run/secrets/openasy-kek` | 32-byte key-encryption key; required. It seals the CA key, server keys and sign-in secrets in the database (ADR 0021) |
 | `VPN_PASSWORD_SIGN_IN` | `true` | `false` when everyone signs in through OIDC |
 | `VPN_OIDC_*` | | Sign-in through your identity provider, see [Sign-in](#sign-in) |
 | `VPN_ADMIN_TOKEN` | | Deprecated: one shared admin token without an expiry, for scripts from before sign-in. Use an API token |
@@ -55,6 +57,18 @@ Sign-in comes from [@openasy/auth](https://github.com/openasy/auth), the same in
   `VPN_OIDC_ALLOWED_DOMAINS`, as in every OpenAsy product.
 
 ## Give someone access
+
+In the UI: add a group and an IP group under **Access**, a person under **People**, then a device on their page. The
+`.ovpn` file downloads once. The same with the [command line tool](#command-line):
+
+```bash
+openasy-vpn groups add "Backend engineers"
+openasy-vpn ip-groups add "Production databases" --network 172.16.20.0/24=tcp/5432 --allow "Backend engineers"
+openasy-vpn people add "Dana Kim" dana@example.com --group "Backend engineers"
+openasy-vpn devices add dana@example.com Laptop   # writes dana-kim-laptop.ovpn, readable by you only
+```
+
+Or with the API directly:
 
 ```bash
 # VPN_API_TOKEN: an API token with the admin role, from Settings → API tokens
@@ -84,7 +98,26 @@ How it works:
   reconnect if it is still allowed.
 - A client config lists the servers `vpn` knows when the file is created, so start the servers before adding devices.
 
-Not built yet: the people, access and sessions screens in the UI, and the CLI.
+## Command line
+
+`openasy-vpn` uses the same API as the UI, with an API token from Settings, API tokens; the token's role decides what
+it may do. It is one file with no dependencies and needs Node 26. Download it from the release, or run it from the
+image without installing anything:
+
+```bash
+export VPN_URL=https://vpn.example.com VPN_API_TOKEN=oa_vpn_...
+curl -LO https://github.com/openasy/vpn/releases/download/v0.5.0/openasy-vpn.ts
+node openasy-vpn.ts help
+node openasy-vpn.ts sessions
+
+# Next to vpn, with compose.yaml: nothing to install, and VPN_URL is not needed
+docker compose exec -T -e VPN_API_TOKEN vpn /nodejs/bin/node cli/openasy-vpn.ts people
+# Anywhere with Docker
+docker run --rm -e VPN_URL -e VPN_API_TOKEN ghcr.io/openasy/vpn:0.5.0 cli/openasy-vpn.ts people
+```
+
+`devices add` never overwrites a file; `--out -` prints the `.ovpn` instead, for example to pass it on in a pipe.
+`--json` prints the API's answers as they are, for scripts.
 
 ## Endpoints
 
@@ -107,7 +140,16 @@ operation and fails if a response does not match it. Errors are RFC 9457 Problem
 (`application/problem+json`) with a stable `code`. The reference is also on the site, without "Try it":
 https://openasy.github.io/products/vpn/api
 
-## Upgrade from vpn-manager
+## Upgrade
+
+### To 0.5.0
+
+- `openasy-kek` is required. `compose.yaml` mounts it since 0.3.0; with `docker run`, mount it at
+  `/run/secrets/openasy-kek`. vpn refuses to start without it, or with a different key than the one it sealed with.
+- On the first start the CA key, the tls-crypt key and the server keys are sealed in place. Certificates already
+  issued stay valid. Upgrades are forward-only (ADR 0010): after this start, 0.4.0 cannot use the sealed keys.
+
+### From vpn-manager
 
 Until 0.4.0 this product was called vpn-manager (ADR 0018). The image is now `ghcr.io/openasy/vpn`; the old images stay
 published but get no new versions.
@@ -132,10 +174,10 @@ docker run --rm -v <project>_vpn-manager-data:/from -v <project>_vpn-data:/to al
 Images are signed with cosign (keyless), carry an SPDX SBOM attestation and SLSA level 3 provenance.
 
 ```bash
-cosign verify ghcr.io/openasy/vpn:0.4.0 \
+cosign verify ghcr.io/openasy/vpn:0.5.0 \
   --certificate-identity-regexp '^https://github.com/openasy/vpn/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-cosign verify-attestation --type spdxjson ghcr.io/openasy/vpn:0.4.0 \
+cosign verify-attestation --type spdxjson ghcr.io/openasy/vpn:0.5.0 \
   --certificate-identity-regexp '^https://github.com/openasy/vpn/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 slsa-verifier verify-image ghcr.io/openasy/vpn@sha256:<digest> --source-uri github.com/openasy/vpn

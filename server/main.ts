@@ -1,8 +1,10 @@
+import { createDecipheriv } from "node:crypto";
 import { existsSync, readFileSync, renameSync } from "node:fs";
 import { createServer } from "node:http";
 import { createAuth, oidcFromEnv, readSecretsKey } from "@openasy/auth";
 import { createApp } from "./app.ts";
 import { openDb } from "./db.ts";
+import { createKeyring } from "./kek.ts";
 import { log } from "./log.ts";
 import { createVpn } from "./vpn.ts";
 
@@ -30,12 +32,62 @@ const docsDir = new URL("../dist/docs", import.meta.url).pathname;
 const openapi = JSON.parse(readFileSync(new URL("../openapi.json", import.meta.url), "utf8")) as Record<string, unknown>;
 const headless = env("VPN_HEADLESS") === "true";
 
+// The key-encryption key (ADR 0021) seals the CA key, server keys and sign-in secrets. It lives outside /data, so a
+// copy of the volume or a backup holds none of them in the clear.
+const secretsKeyFile = process.env.VPN_SECRETS_KEY_FILE ?? "/run/secrets/openasy-kek";
+let kek: Buffer | undefined;
+try {
+  kek = readSecretsKey(secretsKeyFile);
+} catch (err) {
+  log("error", `the key-encryption key cannot be read: ${(err as Error).message}`, { file: secretsKeyFile });
+  process.exit(1);
+}
+if (!kek) {
+  log("error", "no key-encryption key: mount 32 random bytes (openssl rand -hex 32) and set VPN_SECRETS_KEY_FILE if not at the default", { file: secretsKeyFile });
+  process.exit(1);
+}
+
 const db = openDb(dbPath);
-const vpn = createVpn(db, { network: process.env.VPN_NETWORK ?? "10.8.0.0/24", publicHost: process.env.VPN_PUBLIC_HOST });
-await vpn.init();
+
+/**
+ * Up to 0.4.0 only sign-in secrets were sealed, with the same key, and the CA key was in the clear. Before the CA key
+ * is sealed for the first time, check that this key opens those secrets: a different key would seal the CA with a key
+ * that opens nothing else. The format is @openasy/auth's: `v1:` and AES-256-GCM of iv, tag and data.
+ */
+function opensSignInSecrets(key: Buffer): boolean {
+  let rows: Array<{ secret: string }>;
+  try {
+    rows = db.prepare("SELECT secret FROM auth_totp WHERE secret LIKE 'v1:%' LIMIT 3").all() as Array<{ secret: string }>;
+  } catch {
+    return true; // A new database: nothing was sealed yet.
+  }
+  return rows.every(({ secret }) => {
+    try {
+      const raw = Buffer.from(secret.slice(3), "base64url");
+      const d = createDecipheriv("aes-256-gcm", key, raw.subarray(0, 12));
+      d.setAuthTag(raw.subarray(12, 28));
+      Buffer.concat([d.update(raw.subarray(28)), d.final()]);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+const caKey = db.prepare("SELECT value FROM settings WHERE key = 'ca_key'").get() as { value: string } | undefined;
+if (caKey && !caKey.value.startsWith("v1.") && !opensSignInSecrets(kek)) {
+  log("error", "this key-encryption key does not open the sign-in secrets the earlier version sealed: mount the same openasy-kek as before. Nothing was changed", { file: secretsKeyFile });
+  process.exit(1);
+}
+const vpn = createVpn(db, { network: process.env.VPN_NETWORK ?? "10.8.0.0/24", publicHost: process.env.VPN_PUBLIC_HOST, keyring: createKeyring(kek) });
+try {
+  const { sealed } = await vpn.init();
+  if (sealed) log("info", "sealed keys stored in the clear by an earlier version", { sealed });
+} catch (err) {
+  log("error", (err as Error).message, { file: secretsKeyFile });
+  process.exit(1);
+}
 // The address people open vpn at, behind the TLS proxy (ADR 0026). Cookies, passkeys and OIDC redirects use it.
 const publicUrl = (env("VPN_PUBLIC_URL") ?? `http://localhost:${port}`).replace(/\/$/, "");
-const secretsKeyFile = process.env.VPN_SECRETS_KEY_FILE ?? "/run/secrets/openasy-kek";
 const auth = createAuth({
   db,
   product: "vpn",
@@ -45,7 +97,7 @@ const auth = createAuth({
   trustedOrigins: publicUrl.startsWith("http://localhost:") ? [publicUrl.replace("localhost", "127.0.0.1")] : [],
   passwords: process.env.VPN_PASSWORD_SIGN_IN !== "false",
   oidc: oidcFromEnv(process.env, "VPN_"),
-  secretsKey: readSecretsKey(secretsKeyFile),
+  secretsKey: kek,
   // Audit log (ADR 0013): every sign-in, failure and change to members and tokens.
   onEvent: (event) => log(event.type === "sign-in-failed" || event.type === "session-ended" ? "warn" : "info", "auth", { event }),
 });
@@ -70,9 +122,6 @@ if (!process.env.VPN_PUBLIC_HOST) log("warn", "VPN_PUBLIC_HOST is not set; devic
 if (!publicUrl.startsWith("https://") && !/^http:\/\/(localhost|127\.0\.0\.1)(:|$)/.test(publicUrl)) {
   log("warn", "VPN_PUBLIC_URL is not https: browsers will not keep secure cookies or allow passkeys. Put vpn behind TLS (ADR 0026)", { url: publicUrl });
 }
-if (auth.secretsInClear) log("warn", "no secrets key: TOTP secrets are stored unencrypted. Mount a 32-byte key (openssl rand -hex 32)", { file: secretsKeyFile });
-// Until the CA key is encrypted (ADR 0021), keep the data volume as safe as the CA itself.
-log("warn", "the CA key is stored unencrypted in the database: protect the /data volume and its backups");
 const setup = auth.setupLink();
 // No default password (ADR 0013): the first person to open this link becomes the owner.
 if (setup) log("info", "no owner yet: open this link once to create the owner account", { url: setup });
