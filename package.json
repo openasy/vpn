@@ -1,6 +1,6 @@
 {
   "name": "@openasy/vpn-manager",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "OpenAsy VPN manager: API and web UI for OpenVPN servers, users and groups.",
   "license": "AGPL-3.0-only",

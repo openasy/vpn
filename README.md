@@ -111,10 +111,10 @@ https://openasy.github.io/products/vpn/api
 Images are signed with cosign (keyless), carry an SPDX SBOM attestation and SLSA level 3 provenance.
 
 ```bash
-cosign verify ghcr.io/openasy/vpn-manager:0.1.0 \
+cosign verify ghcr.io/openasy/vpn-manager:0.3.0 \
   --certificate-identity-regexp '^https://github.com/openasy/vpn-manager/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-cosign verify-attestation --type spdxjson ghcr.io/openasy/vpn-manager:0.1.0 \
+cosign verify-attestation --type spdxjson ghcr.io/openasy/vpn-manager:0.3.0 \
   --certificate-identity-regexp '^https://github.com/openasy/vpn-manager/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 slsa-verifier verify-image ghcr.io/openasy/vpn-manager@sha256:<digest> --source-uri github.com/openasy/vpn-manager
