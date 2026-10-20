@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join, normalize } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { AuthError, mergeOpenApi, sendProblem, type Auth, type Role } from "@openasy/auth";
 import { log } from "./log.ts";
 import { countRequest, renderMetrics } from "./metrics.ts";
 import { VpnError, type ReportedSession, type Vpn } from "./vpn.ts";
@@ -13,9 +14,11 @@ export interface AppOptions {
   version: string;
   /** Shared token the vpn-server agents send; their requests are refused when unset. */
   serverToken?: string;
+  /** Sign-in, sessions, members and API tokens (ADR 0002, 0003). */
+  auth: Auth;
   /**
-   * Token for the management API until sign-in exists (ADR 0002). Management requests are
-   * refused when it is unset.
+   * Deprecated: one shared token with the admin role, for scripts written before sign-in existed. Use an API token
+   * from Settings instead; this one has no expiry and is not tied to a person.
    */
   adminToken?: string;
   /** Built web UI; omit to run headless (ADR 0018). */
@@ -127,7 +130,8 @@ function tokenMatches(header: string | undefined, expected: string | undefined):
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-type Auth = "none" | "admin" | "server";
+/** The role a route needs (ADR 0003), or "server" for the vpn-server agents. */
+type Access = "none" | "server" | Role;
 interface Ctx {
   req: IncomingMessage;
   res: ServerResponse;
@@ -138,7 +142,7 @@ interface Route {
   method: string;
   /** Path pattern; each `:name` matches one segment. */
   path: string;
-  auth: Auth;
+  auth: Access;
   /** Largest accepted body; 64 KiB by default. */
   bodyLimit?: number;
   handle: (ctx: Ctx) => unknown;
@@ -172,8 +176,9 @@ function parseSessions(value: unknown): ReportedSession[] {
 /** Sessions from a server that has not reported for this long are not shown: they may be gone. */
 const SESSION_FRESH_MS = 60_000;
 
-export function createApp({ db, vpn, version, serverToken, adminToken, webDir, docsDir, openapi }: AppOptions) {
-  const spec = openapi && JSON.stringify({ ...openapi, info: { ...(openapi.info as object), version } });
+export function createApp({ db, vpn, version, auth, serverToken, adminToken, webDir, docsDir, openapi }: AppOptions) {
+  // The served description includes /api/v1/auth from @openasy/auth, so the API reference documents sign-in too.
+  const spec = openapi && JSON.stringify({ ...mergeOpenApi(openapi), info: { ...(openapi.info as object), version } });
   const listServers = db.prepare("SELECT id, version, listen, openvpn_running, config_version, last_seen FROM servers ORDER BY id");
   const countServers = db.prepare("SELECT COUNT(*) AS n FROM servers");
   const upsertServer = db.prepare(
@@ -195,7 +200,7 @@ export function createApp({ db, vpn, version, serverToken, adminToken, webDir, d
     {
       method: "GET",
       path: "/api/v1/servers",
-      auth: "admin",
+      auth: "viewer",
       handle: () => {
         const rows = listServers.all() as Array<{ id: string; version: string; listen: string | null; openvpn_running: number; config_version: string | null; last_seen: string }>;
         const servers: Server[] = rows.map((r) => ({ id: r.id, version: r.version, listen: r.listen, openvpnRunning: r.openvpn_running === 1, configVersion: r.config_version, lastSeen: r.last_seen }));
@@ -248,11 +253,11 @@ export function createApp({ db, vpn, version, serverToken, adminToken, webDir, d
     },
 
     // Live sessions.
-    { method: "GET", path: "/api/v1/sessions", auth: "admin", handle: () => ({ sessions: vpn.listSessions(SESSION_FRESH_MS) }) },
+    { method: "GET", path: "/api/v1/sessions", auth: "viewer", handle: () => ({ sessions: vpn.listSessions(SESSION_FRESH_MS) }) },
     {
       method: "DELETE",
       path: "/api/v1/sessions/:server/:device",
-      auth: "admin",
+      auth: "editor",
       handle: ({ res, params }) => {
         vpn.requestDisconnect(params[0]!, params[1]!);
         json(res, 202, { status: "accepted" });
@@ -260,34 +265,37 @@ export function createApp({ db, vpn, version, serverToken, adminToken, webDir, d
     },
 
     // People and their devices.
-    { method: "GET", path: "/api/v1/people", auth: "admin", handle: () => ({ people: vpn.listPeople() }) },
-    { method: "POST", path: "/api/v1/people", auth: "admin", handle: async ({ res, body }) => created(res, vpn.createPerson(await body())) },
-    { method: "GET", path: "/api/v1/people/:id", auth: "admin", handle: ({ params }) => vpn.person(params[0]!) },
-    { method: "PATCH", path: "/api/v1/people/:id", auth: "admin", handle: async ({ params, body }) => vpn.updatePerson(params[0]!, await body()) },
+    { method: "GET", path: "/api/v1/people", auth: "viewer", handle: () => ({ people: vpn.listPeople() }) },
+    { method: "POST", path: "/api/v1/people", auth: "editor", handle: async ({ res, body }) => created(res, vpn.createPerson(await body())) },
+    { method: "GET", path: "/api/v1/people/:id", auth: "viewer", handle: ({ params }) => vpn.person(params[0]!) },
+    { method: "PATCH", path: "/api/v1/people/:id", auth: "editor", handle: async ({ params, body }) => vpn.updatePerson(params[0]!, await body()) },
     { method: "DELETE", path: "/api/v1/people/:id", auth: "admin", handle: ({ res, params }) => (vpn.deletePerson(params[0]!), noContent(res)) },
-    { method: "GET", path: "/api/v1/people/:id/devices", auth: "admin", handle: ({ params }) => ({ devices: vpn.listDevices(params[0]!) }) },
-    { method: "POST", path: "/api/v1/people/:id/devices", auth: "admin", handle: async ({ res, params, body }) => created(res, await vpn.createDevice(params[0]!, await body())) },
-    { method: "DELETE", path: "/api/v1/devices/:id", auth: "admin", handle: ({ params }) => vpn.revokeDevice(params[0]!) },
+    { method: "GET", path: "/api/v1/people/:id/devices", auth: "viewer", handle: ({ params }) => ({ devices: vpn.listDevices(params[0]!) }) },
+    { method: "POST", path: "/api/v1/people/:id/devices", auth: "editor", handle: async ({ res, params, body }) => created(res, await vpn.createDevice(params[0]!, await body())) },
+    { method: "DELETE", path: "/api/v1/devices/:id", auth: "editor", handle: ({ params }) => vpn.revokeDevice(params[0]!) },
 
     // Groups and IP groups.
-    { method: "GET", path: "/api/v1/groups", auth: "admin", handle: () => ({ groups: vpn.listGroups() }) },
+    { method: "GET", path: "/api/v1/groups", auth: "viewer", handle: () => ({ groups: vpn.listGroups() }) },
     { method: "POST", path: "/api/v1/groups", auth: "admin", handle: async ({ res, body }) => created(res, vpn.createGroup(await body())) },
     { method: "DELETE", path: "/api/v1/groups/:id", auth: "admin", handle: ({ res, params }) => (vpn.deleteGroup(params[0]!), noContent(res)) },
-    { method: "GET", path: "/api/v1/ip-groups", auth: "admin", handle: () => ({ ipGroups: vpn.listIpGroups() }) },
+    { method: "GET", path: "/api/v1/ip-groups", auth: "viewer", handle: () => ({ ipGroups: vpn.listIpGroups() }) },
     { method: "POST", path: "/api/v1/ip-groups", auth: "admin", handle: async ({ res, body }) => created(res, vpn.createIpGroup(await body())) },
-    { method: "GET", path: "/api/v1/ip-groups/:id", auth: "admin", handle: ({ params }) => vpn.ipGroup(params[0]!) },
+    { method: "GET", path: "/api/v1/ip-groups/:id", auth: "viewer", handle: ({ params }) => vpn.ipGroup(params[0]!) },
     { method: "PATCH", path: "/api/v1/ip-groups/:id", auth: "admin", handle: async ({ params, body }) => vpn.updateIpGroup(params[0]!, await body()) },
     { method: "DELETE", path: "/api/v1/ip-groups/:id", auth: "admin", handle: ({ res, params }) => (vpn.deleteIpGroup(params[0]!), noContent(res)) },
   ];
 
   const compiled = routes.map((r) => ({ ...r, re: new RegExp(`^${r.path.replace(/:[a-z]+/g, "([^/]+)")}$`) }));
 
-  function authorize(req: IncomingMessage, auth: Auth) {
-    if (auth === "none") return;
-    const expected = auth === "admin" ? adminToken : serverToken;
-    const name = auth === "admin" ? "VPN_ADMIN_TOKEN" : "VPN_SERVER_TOKEN";
-    if (!expected) throw new HttpProblem(503, "not-configured", `Set ${name} on vpn-manager to use this endpoint.`);
-    if (!tokenMatches(req.headers.authorization, expected)) throw new HttpProblem(401, "invalid-token", `Send ${name} as a bearer token.`);
+  function authorize(req: IncomingMessage, access: Access) {
+    if (access === "none") return;
+    if (access === "server") {
+      if (!serverToken) throw new HttpProblem(503, "not-configured", "Set VPN_SERVER_TOKEN on vpn-manager to use this endpoint.");
+      if (!tokenMatches(req.headers.authorization, serverToken)) throw new HttpProblem(401, "invalid-token", "Send VPN_SERVER_TOKEN as a bearer token.");
+      return;
+    }
+    if (tokenMatches(req.headers.authorization, adminToken)) return;
+    auth.authorize(req, access);
   }
 
   async function route(req: IncomingMessage, res: ServerResponse): Promise<string> {
@@ -324,6 +332,8 @@ export function createApp({ db, vpn, version, serverToken, adminToken, webDir, d
       return "/api/docs";
     }
 
+    if (await auth.handle(req, res)) return auth.routeName(req) ?? "/api/v1/auth/*";
+
     for (const r of compiled) {
       const m = path.match(r.re);
       if (!m || r.method !== req.method) continue;
@@ -333,7 +343,8 @@ export function createApp({ db, vpn, version, serverToken, adminToken, webDir, d
         const result = await r.handle({ req, res, params, body: () => readJson(req, r.bodyLimit) });
         if (!res.headersSent && result !== undefined) json(res, 200, result);
       } catch (err) {
-        if (err instanceof HttpProblem || err instanceof VpnError) problem(res, err.status, err.code, err.message);
+        if (err instanceof AuthError) sendProblem(res, err);
+        else if (err instanceof HttpProblem || err instanceof VpnError) problem(res, err.status, err.code, err.message);
         else throw err;
       }
       return r.path;

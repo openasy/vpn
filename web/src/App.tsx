@@ -1,5 +1,7 @@
-import { AppShell, BrandProvider, Button, Callout, EmptyState, KpiCard, KpiGrid, PageHeader, Panel, TextField } from "@openasy/ui";
-import { useEffect, useState, type FormEvent } from "react";
+import { AppShell, BrandProvider, Button, EmptyState, KpiCard, KpiGrid, PageHeader, Panel } from "@openasy/ui";
+import { AccountSettings, AuthGate, MembersSettings, TokensSettings, useAuth } from "@openasy/auth/react";
+import { KeyRound, LogOut, Server as ServerIcon, UserRound, Users } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 
 interface Server {
   id: string;
@@ -10,120 +12,148 @@ interface Server {
   lastSeen: string;
 }
 
-// Until sign-in exists (ADR 0002), the UI uses VPN_ADMIN_TOKEN, kept only for this browser tab.
-const TOKEN_KEY = "vpn-admin-token";
-const readToken = () => {
-  try {
-    return sessionStorage.getItem(TOKEN_KEY) ?? "";
-  } catch {
-    return "";
-  }
-};
-
 class Unauthorized extends Error {}
+class MfaSetupRequired extends Error {}
 
-// The UI is an ordinary client of the public API (ADR 0014, 0018).
-async function get<T>(path: string, token: string): Promise<T> {
-  const res = await fetch(path, { headers: token ? { authorization: `Bearer ${token}` } : {} });
-  if (res.status === 401 || res.status === 503) throw new Unauthorized(((await res.json()) as { detail?: string }).detail);
-  if (!res.ok) throw new Error(`${path}: ${res.status}`);
+// The UI is an ordinary client of the public API (ADR 0014, 0018). The session is an HttpOnly cookie set by sign-in.
+async function get<T>(path: string): Promise<T> {
+  const res = await fetch(path, { credentials: "same-origin" });
+  if (!res.ok) {
+    const problem = (await res.json().catch(() => ({}))) as { code?: string; detail?: string };
+    if (res.status === 401) throw new Unauthorized(problem.detail);
+    if (problem.code === "mfa-setup-required") throw new MfaSetupRequired(problem.detail);
+    throw new Error(problem.detail ?? `${path}: ${res.status}`);
+  }
   return res.json() as Promise<T>;
 }
 
-function TokenForm({ error, onToken }: { error?: string; onToken: (t: string) => void }) {
-  const [value, setValue] = useState("");
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    onToken(value.trim());
-  };
+/** Data loading with the session; when it ends, the sign-in screen comes back. */
+function useGet() {
+  const { expired, refresh } = useAuth();
+  return useCallback(
+    async <T,>(path: string): Promise<T> => {
+      try {
+        return await get<T>(path);
+      } catch (err) {
+        if (err instanceof Unauthorized) expired();
+        if (err instanceof MfaSetupRequired) void refresh();
+        throw err;
+      }
+    },
+    [expired, refresh],
+  );
+}
+
+function ServersPage({ version }: { version?: string }) {
+  const call = useGet();
+  const [servers, setServers] = useState<Server[]>([]);
+  useEffect(() => {
+    const load = () => call<{ servers: Server[] }>("/api/v1/servers").then((r) => setServers(r.servers), () => {});
+    void load();
+    const timer = setInterval(load, 10_000);
+    return () => clearInterval(timer);
+  }, [call]);
+  const running = servers.filter((s) => s.openvpnRunning).length;
   return (
-    <Panel title="Admin token">
-      <form onSubmit={submit} className="flex max-w-md flex-col gap-3">
-        <p className="m-0 text-sm text-fg-muted">Sign-in is not built yet. Paste the VPN_ADMIN_TOKEN set on vpn-manager; it is kept only in this tab.</p>
-        <TextField label="VPN_ADMIN_TOKEN" type="password" autoComplete="off" mono value={value} onChange={(e) => setValue(e.target.value)} error={error} />
-        <div>
-          <Button type="submit" variant="primary" disabled={!value.trim()}>
-            Continue
-          </Button>
-        </div>
-      </form>
-    </Panel>
+    <>
+      <PageHeader title="Servers" description={version ? `vpn-manager ${version}. Manage people and devices through the API at /api/docs/.` : undefined} />
+      <KpiGrid>
+        <KpiCard label="Servers" value={servers.length} />
+        <KpiCard label="OpenVPN running" value={running} tone={running < servers.length ? "warning" : "success"} />
+      </KpiGrid>
+      <Panel title="Connected servers">
+        {servers.length === 0 ? (
+          <EmptyState title="No servers yet">Start vpn-server with VPN_MANAGER_URL and VPN_SERVER_TOKEN pointing here.</EmptyState>
+        ) : (
+          <ul>
+            {servers.map((s) => (
+              <li key={s.id}>
+                {s.id} · {s.listen ?? "udp/1194"} · {s.version} · {s.openvpnRunning ? "running" : "stopped"} · config {s.configVersion ?? "not applied"} · last seen{" "}
+                {new Date(s.lastSeen).toLocaleString()}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Panel>
+    </>
+  );
+}
+
+type Page = "servers" | "account" | "members" | "tokens";
+const parsePage = (hash: string): Page => {
+  const p = hash.replace(/^#\/?/, "");
+  return p === "account" || p === "members" || p === "tokens" ? p : "servers";
+};
+
+const SETTINGS = {
+  account: ["Account", "Your profile, password, two-step verification and where you are signed in."],
+  members: ["Members", "Who can sign in to this vpn-manager, and with which role. Viewers see everything; editors also add people and devices and end sessions; admins also remove people and manage groups, IP groups, members and tokens."],
+  tokens: ["API tokens", "For scripts. Each token has one role and an expiry; the secret is shown once."],
+} as const;
+
+function Product() {
+  const { me, can, signOut } = useAuth();
+  const [version, setVersion] = useState<string>();
+  const [page, setPage] = useState<Page>(() => parsePage(window.location.hash));
+
+  useEffect(() => {
+    void get<{ version: string }>("/api/v1/version").then((v) => setVersion(v.version));
+    const onHash = () => setPage(parsePage(window.location.hash));
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  const footerNav = [
+    ...(can("admin")
+      ? [
+          { id: "members", label: "Members", icon: Users },
+          { id: "tokens", label: "API tokens", icon: KeyRound },
+        ]
+      : []),
+    { id: "account", label: "Account", icon: UserRound },
+  ];
+  const roleName = me.user.role.charAt(0).toUpperCase() + me.user.role.slice(1);
+
+  return (
+    <AppShell
+      product="vpn"
+      nav={[{ id: "servers", label: "Servers", icon: ServerIcon }]}
+      activeNav={page}
+      onNavigate={(id) => (window.location.hash = `#/${id}`)}
+      footerNav={footerNav}
+      user={{ name: me.user.name, role: roleName }}
+    >
+      {page === "servers" ? (
+        <ServersPage version={version} />
+      ) : page !== "account" && !can("admin") ? (
+        <EmptyState title="Admins only">Ask an admin of this vpn-manager for access.</EmptyState>
+      ) : (
+        <>
+          <PageHeader
+            title={SETTINGS[page][0]}
+            description={SETTINGS[page][1]}
+            actions={
+              page === "account" && (
+                <Button icon={<LogOut />} onClick={() => void signOut()}>
+                  Sign out
+                </Button>
+              )
+            }
+          />
+          {page === "account" ? <AccountSettings /> : page === "members" ? <MembersSettings /> : <TokensSettings />}
+        </>
+      )}
+    </AppShell>
   );
 }
 
 export function App() {
-  const [version, setVersion] = useState<string>();
-  const [token, setToken] = useState(readToken);
-  const [authError, setAuthError] = useState<string>();
-  const [servers, setServers] = useState<Server[]>([]);
-
-  useEffect(() => {
-    get<{ version: string }>("/api/v1/version", "").then((v) => setVersion(v.version));
-  }, []);
-
-  useEffect(() => {
-    if (!token) return;
-    const load = () =>
-      get<{ servers: Server[] }>("/api/v1/servers", token).then(
-        (r) => {
-          setServers(r.servers);
-          setAuthError(undefined);
-        },
-        (err: Error) => {
-          if (err instanceof Unauthorized) {
-            setAuthError(err.message);
-            setToken("");
-          }
-        },
-      );
-    load();
-    const timer = setInterval(load, 10_000);
-    return () => clearInterval(timer);
-  }, [token]);
-
-  const saveToken = (t: string) => {
-    try {
-      sessionStorage.setItem(TOKEN_KEY, t);
-    } catch {
-      // Storage blocked: the token lasts until the page reloads.
-    }
-    setToken(t);
-  };
-
-  const running = servers.filter((s) => s.openvpnRunning).length;
-
   return (
-    <BrandProvider>
-      <AppShell product="vpn" nav={[{ id: "servers", label: "Servers" }]} activeNav="servers">
-        <PageHeader title="Servers" description={version ? `vpn-manager ${version}` : undefined} />
-        <Callout tone="warning" title="For testing only">
-          This release has no sign-in and keeps the CA key unencrypted. Manage people and devices through the API at <a href="/api/docs/">/api/docs/</a>.
-        </Callout>
-        {!token ? (
-          <TokenForm error={authError} onToken={saveToken} />
-        ) : (
-          <>
-            <KpiGrid>
-              <KpiCard label="Servers" value={servers.length} />
-              <KpiCard label="OpenVPN running" value={running} tone={running < servers.length ? "warning" : "success"} />
-            </KpiGrid>
-            <Panel title="Connected servers">
-              {servers.length === 0 ? (
-                <EmptyState title="No servers yet">Start vpn-server with VPN_MANAGER_URL and VPN_SERVER_TOKEN pointing here.</EmptyState>
-              ) : (
-                <ul>
-                  {servers.map((s) => (
-                    <li key={s.id}>
-                      {s.id} · {s.listen ?? "udp/1194"} · {s.version} · {s.openvpnRunning ? "running" : "stopped"} · config {s.configVersion ?? "not applied"} · last seen{" "}
-                      {new Date(s.lastSeen).toLocaleString()}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Panel>
-          </>
-        )}
-      </AppShell>
+    // No organization until branding is configurable (ADR 0004); the library's default is a placeholder.
+    <BrandProvider brand={{ name: "OpenAsy", organization: undefined }} className="min-h-screen">
+      <AuthGate product="OpenAsy VPN">
+        <Product />
+      </AuthGate>
     </BrandProvider>
   );
 }

@@ -23,6 +23,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "ajv": "^8.20.0",
+    "lucide-react": "^1.60.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "swagger-ui-dist": "^5.34.0",
@@ -35,6 +36,7 @@
     "npm": ">=11"
   },
   "dependencies": {
+    "@openasy/auth": "https://github.com/openasy/auth/releases/download/v0.1.0/openasy-auth-0.1.0.tgz",
     "@peculiar/x509": "^2.2.0",
     "reflect-metadata": "^0.2.2"
   }

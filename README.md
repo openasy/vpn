@@ -3,35 +3,61 @@
 The [OpenAsy](https://github.com/openasy) VPN product: API and web UI for OpenVPN servers, in one container with one version.
 OpenVPN itself runs on hosts as the separate [vpn-server](https://github.com/openasy/vpn-server) agent.
 
-> **For testing only.** This release has no sign-in yet (ADR 0002): the management API uses one shared
-> `VPN_ADMIN_TOKEN`, and the CA key is stored unencrypted in the database (ADR 0021). Both come in the next phase.
+People sign in with an account (password plus authenticator app or passkey), with a passkey alone, or through your
+identity provider (OIDC). Each person has a role in this vpn-manager; scripts use API tokens. See [Sign-in](#sign-in).
+
+> The CA key is still stored unencrypted in the database (ADR 0021): protect the `/data` volume and its backups.
 
 ## Run
 
 ```bash
-export VPN_SERVER_TOKEN=$(openssl rand -hex 32) VPN_ADMIN_TOKEN=$(openssl rand -hex 32)
+export VPN_SERVER_TOKEN=$(openssl rand -hex 32)
 export VPN_PUBLIC_HOST=vpn.example.com   # the name or IP clients connect to
+openssl rand -hex 32 > openasy-kek
 docker compose up -d
+docker compose logs vpn-manager | grep 'no owner yet'
 ```
 
+Open the link from the log once to create the owner account; there is no default password (ADR 0013).
+
 [`compose.yaml`](./compose.yaml) starts `ghcr.io/openasy/vpn-manager` and two `ghcr.io/openasy/vpn-server` agents, one on
-UDP 1194 and one on TCP 443. The UI and API are on http://127.0.0.1:8080; the API reference with *Try it out* is at
-http://127.0.0.1:8080/api/docs/ (click *Authorize* and paste `VPN_ADMIN_TOKEN`).
+UDP 1194 and one on TCP 443. The UI and API are on http://localhost:8080; the API reference with *Try it out* is at
+http://localhost:8080/api/docs/ (click *Authorize* and paste an API token).
 
 | Variable | Default | |
 | --- | --- | --- |
 | `PORT` | `8080` | HTTP port |
 | `VPN_MANAGER_DB` | `/data/vpn-manager.db` | SQLite file (WAL), on the `/data` volume |
-| `VPN_ADMIN_TOKEN` | | Bearer token for the management API and UI; everything is refused without it |
+| `VPN_MANAGER_PUBLIC_URL` | `http://localhost:8080` | The address people open, with `https://` behind your TLS proxy. Cookies, passkeys and OIDC redirects use it |
 | `VPN_SERVER_TOKEN` | | Token vpn-server agents send; they are refused without it |
+| `VPN_SECRETS_KEY_FILE` | `/run/secrets/openasy-kek` | 32-byte key that encrypts sign-in secrets in the database (ADR 0021) |
+| `VPN_PASSWORD_SIGN_IN` | `true` | `false` when everyone signs in through OIDC |
+| `VPN_OIDC_*` | | Sign-in through your identity provider, see [Sign-in](#sign-in) |
+| `VPN_ADMIN_TOKEN` | | Deprecated: one shared admin token without an expiry, for scripts from before sign-in. Use an API token |
 | `VPN_PUBLIC_HOST` | | Host name or IP clients connect to; needed to add devices |
 | `VPN_NETWORK` | `10.8.0.0/24` | Address pool for clients; each device gets a fixed address from it |
 | `VPN_MANAGER_HEADLESS` | `false` | `true` serves only the API |
 
+## Sign-in
+
+Sign-in comes from [@openasy/auth](https://github.com/openasy/auth), the same in every OpenAsy product (ADR 0002).
+
+- **Roles** (ADR 0003): viewers see everything; editors also add people and devices, revoke devices and end sessions;
+  admins also remove people and manage groups, IP groups, members and API tokens; owners also manage owners. Owners
+  and admins who sign in with a password must add an authenticator app or a passkey.
+- **Members**: admins invite people under Settings → Members and send them the one-time link (there is no email yet).
+  These are the people who manage the VPN, not the VPN users under `/api/v1/people`.
+- **API tokens**: Settings → API tokens. One role each, an expiry within a year, shown once.
+- **OIDC**: register vpn-manager with the redirect URI `<VPN_MANAGER_PUBLIC_URL>/api/v1/auth/oidc/sso/callback` and set
+  `VPN_OIDC_ISSUER`, `VPN_OIDC_CLIENT_ID` and `VPN_OIDC_CLIENT_SECRET`. Optional: `VPN_OIDC_NAME`, `VPN_OIDC_SCOPES`,
+  `VPN_OIDC_GROUPS_CLAIM`, `VPN_OIDC_ROLE_MAPPING` (`vpn-admins=admin,staff=viewer`), `VPN_OIDC_DEFAULT_ROLE` and
+  `VPN_OIDC_ALLOWED_DOMAINS`, as in every OpenAsy product.
+
 ## Give someone access
 
 ```bash
-API=http://127.0.0.1:8080/api/v1; AUTH="Authorization: Bearer $VPN_ADMIN_TOKEN"
+# VPN_API_TOKEN: an API token with the admin role, from Settings → API tokens
+API=http://localhost:8080/api/v1; AUTH="Authorization: Bearer $VPN_API_TOKEN"
 curl -sH "$AUTH" $API/groups -d '{"name":"Backend engineers"}'
 curl -sH "$AUTH" $API/ip-groups -d '{"name":"Production databases","networks":[{"cidr":"172.16.20.0/24","ports":"tcp/5432"}],"allowedGroups":["Backend engineers"]}'
 curl -sH "$AUTH" $API/people -d '{"name":"Dana Kim","email":"dana@example.com","groups":["Backend engineers"]}'

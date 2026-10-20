@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { X509Certificate } from "node:crypto";
+import { createHmac, X509Certificate } from "node:crypto";
 import * as x509 from "@peculiar/x509";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startApp } from "./test-app.ts";
@@ -28,12 +28,76 @@ describe("management API", () => {
     expect((await app.agent("/api/v1/people")).status).toBe(401);
   });
 
-  it("is closed when no admin token is configured", async () => {
+  it("is closed to everyone without sign-in when no admin token is configured", async () => {
     const closed = await startApp({ version: "1.2.3", adminToken: undefined });
     const res = await closed.admin("/api/v1/people");
-    expect(res.status).toBe(503);
-    expect(await res.json()).toMatchObject({ code: "not-configured" });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toMatchObject({ code: "invalid-token" });
+    expect(await (await fetch(`${closed.base}/api/v1/people`)).json()).toMatchObject({ code: "unauthenticated" });
     await closed.close();
+  });
+});
+
+/** A browser: keeps cookies and sends the Origin header of the page. */
+function browser(base: string) {
+  const jar = new Map<string, string>();
+  return async (path: string, init: { method?: string; body?: unknown; origin?: string } = {}) => {
+    const res = await fetch(base + path, {
+      method: init.method ?? (init.body === undefined ? "GET" : "POST"),
+      headers: { origin: init.origin ?? base, cookie: [...jar].map(([k, v]) => `${k}=${v}`).join("; "), ...(init.body !== undefined && { "content-type": "application/json" }) },
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    });
+    for (const c of res.headers.getSetCookie()) {
+      const [pair] = c.split(";");
+      const i = pair!.indexOf("=");
+      jar.set(pair!.slice(0, i), pair!.slice(i + 1));
+    }
+    return res;
+  };
+}
+
+/** The current RFC 6238 code for a base32 secret. */
+function totpNow(secret: string) {
+  const bits = [...secret].map((c) => "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".indexOf(c).toString(2).padStart(5, "0")).join("");
+  const key = Buffer.from(bits.match(/.{8}/g)!.map((b) => parseInt(b, 2)));
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30_000)));
+  const mac = createHmac("sha1", key).update(counter).digest();
+  return String((mac.readUInt32BE(mac[19]! & 15) & 0x7fffffff) % 1_000_000).padStart(6, "0");
+}
+
+describe("sign-in and roles", () => {
+  const PASSWORD = "correct horse battery staple";
+
+  it("gives viewers, editors and admins what their role allows", async () => {
+    const own = await startApp({ version: "1.2.3" });
+    const o = browser(own.base);
+    const token = new URL(own.auth.setupLink()!).searchParams.get("setup");
+    await o("/api/v1/auth/setup", { body: { token, name: "Olivia", email: "owner@example.com", password: PASSWORD } });
+    expect(await (await o("/api/v1/people")).json()).toMatchObject({ code: "mfa-setup-required" });
+    const { secret } = (await (await o("/api/v1/auth/me/totp", { body: {} })).json()) as { secret: string };
+    await o("/api/v1/auth/me/totp/confirm", { body: { code: totpNow(secret) } });
+    expect((await o("/api/v1/groups", { body: { name: "Staff" } })).status).toBe(201);
+
+    const member = async (email: string, role: string) => {
+      const { link } = (await (await o("/api/v1/auth/members", { body: { email, role } })).json()) as { link: string };
+      const b = browser(own.base);
+      await b(`/api/v1/auth/links/${new URL(link).searchParams.get("link")}`, { body: { password: PASSWORD } });
+      return b;
+    };
+    const viewer = await member("vic@example.com", "viewer");
+    expect((await viewer("/api/v1/people")).status).toBe(200);
+    expect((await viewer("/api/v1/people", { body: { name: "X", email: "x@example.com" } })).status).toBe(403);
+
+    const editor = await member("ed@example.com", "editor");
+    const person = (await (await editor("/api/v1/people", { body: { name: "Dana", email: "dana@example.com", groups: ["Staff"] } })).json()) as { id: string };
+    expect((await editor(`/api/v1/people/${person.id}/devices`, { body: { name: "Laptop" } })).status).toBe(201);
+    expect((await editor("/api/v1/ip-groups", { body: { name: "DB", networks: [{ cidr: "10.0.0.0/24" }] } })).status).toBe(403);
+    expect((await editor(`/api/v1/people/${person.id}`, { method: "DELETE" })).status).toBe(403);
+    expect((await editor("/api/v1/groups", { body: { name: "X" }, origin: "https://evil.example" })).status).toBe(403);
+
+    expect((await o(`/api/v1/people/${person.id}`, { method: "DELETE" })).status).toBe(204);
+    await own.close();
   });
 });
 

@@ -4,7 +4,7 @@
     "title": "OpenAsy VPN manager API",
     "version": "0.2.0",
     "summary": "Servers, users and access for OpenVPN.",
-    "description": "Every screen of vpn-manager uses this API, and so can your scripts (ADR 0014). Within `/api/v1` changes are additive only; anything removed is deprecated first (ADR 0024). Errors use Problem Details (RFC 9457).\n\nUntil sign-in exists (ADR 0002), management endpoints take `VPN_ADMIN_TOKEN` as a bearer token and agents take `VPN_SERVER_TOKEN`. Use this release only for testing.",
+    "description": "Every screen of vpn-manager uses this API, and so can your scripts (ADR 0014). Within `/api/v1` changes are additive only; anything removed is deprecated first (ADR 0024). Errors use Problem Details (RFC 9457).\n\nAgents take `VPN_SERVER_TOKEN`. Everything else takes the session of a signed-in person or an API token, and each operation names the role it needs (`x-openasy-role`: viewer, editor, admin; ADR 0003).\n\nSign-in, members and API tokens are under `/api/v1/auth`, provided by [@openasy/auth](https://github.com/openasy/auth#routes).",
     "license": {
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
@@ -48,6 +48,12 @@
         "summary": "List people",
         "security": [
           {
+            "session": []
+          },
+          {
+            "apiToken": []
+          },
+          {
             "adminToken": []
           }
         ],
@@ -65,10 +71,15 @@
           "401": {
             "$ref": "#/components/responses/Problem"
           },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "x-openasy-role": "viewer",
+        "description": "Needs the viewer role."
       },
       "post": {
         "operationId": "createPerson",
@@ -77,6 +88,12 @@
         ],
         "summary": "Add a person",
         "security": [
+          {
+            "session": []
+          },
+          {
+            "apiToken": []
+          },
           {
             "adminToken": []
           }
@@ -108,6 +125,9 @@
           "401": {
             "$ref": "#/components/responses/Problem"
           },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
           "409": {
             "$ref": "#/components/responses/Problem"
           },
@@ -117,7 +137,9 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "x-openasy-role": "editor",
+        "description": "Needs the editor role."
       }
     },
     "/api/v1/people/{id}": {
@@ -128,6 +150,12 @@
         ],
         "summary": "Get a person",
         "security": [
+          {
+            "session": []
+          },
+          {
+            "apiToken": []
+          },
           {
             "adminToken": []
           }
@@ -157,13 +185,18 @@
           "401": {
             "$ref": "#/components/responses/Problem"
           },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
           "404": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "x-openasy-role": "viewer",
+        "description": "Needs the viewer role."
       },
       "patch": {
         "operationId": "updatePerson",
@@ -171,8 +204,14 @@
           "People"
         ],
         "summary": "Change a person",
-        "description": "Suspending removes their devices from every server at the next config pull; activating brings them back.",
+        "description": "Suspending removes their devices from every server at the next config pull; activating brings them back.\n\nNeeds the editor role.",
         "security": [
+          {
+            "session": []
+          },
+          {
+            "apiToken": []
+          },
           {
             "adminToken": []
           }
@@ -215,6 +254,9 @@
           "401": {
             "$ref": "#/components/responses/Problem"
           },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
           "404": {
             "$ref": "#/components/responses/Problem"
           },
@@ -224,7 +266,8 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "x-openasy-role": "editor"
       },
       "delete": {
         "operationId": "deletePerson",
@@ -232,8 +275,14 @@
           "People"
         ],
         "summary": "Delete a person",
-        "description": "Revokes all their devices first; the revocations stay in the CRL.",
+        "description": "Revokes all their devices first; the revocations stay in the CRL.\n\nNeeds the admin role.",
         "security": [
+          {
+            "session": []
+          },
+          {
+            "apiToken": []
+          },
           {
             "adminToken": []
           }
@@ -256,13 +305,17 @@
           "401": {
             "$ref": "#/components/responses/Problem"
           },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
           "404": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "x-openasy-role": "admin"
       }
     },
     "/api/v1/people/{id}/devices": {
@@ -273,6 +326,12 @@
         ],
         "summary": "List a person's devices",
         "security": [
+          {
+            "session": []
+          },
+          {
+            "apiToken": []
+          },
           {
             "adminToken": []
           }
@@ -302,13 +361,18 @@
           "401": {
             "$ref": "#/components/responses/Problem"
           },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
           "404": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "x-openasy-role": "viewer",
+        "description": "Needs the viewer role."
       },
       "post": {
         "operationId": "createDevice",
@@ -316,8 +380,14 @@
           "People"
         ],
         "summary": "Add a device",
-        "description": "Issues a certificate and a fixed VPN address, and returns the client config with the device's private key. The key is not stored: this is the only time it is shown.",
+        "description": "Issues a certificate and a fixed VPN address, and returns the client config with the device's private key. The key is not stored: this is the only time it is shown.\n\nNeeds the editor role.",
         "security": [
+          {
+            "session": []
+          },
+          {
+            "apiToken": []
+          },
           {
             "adminToken": []
           }
@@ -360,6 +430,9 @@
           "401": {
             "$ref": "#/components/responses/Problem"
           },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
           "404": {
             "$ref": "#/components/responses/Problem"
           },
@@ -372,7 +445,8 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "x-openasy-role": "editor"
       }
     },
     "/api/v1/devices/{id}": {
@@ -382,8 +456,14 @@
           "People"
         ],
         "summary": "Revoke a device",
-        "description": "Adds its certificate to the CRL and removes it from every server at the next config pull.",
+        "description": "Adds its certificate to the CRL and removes it from every server at the next config pull.\n\nNeeds the editor role.",
         "security": [
+          {
+            "session": []
+          },
+          {
+            "apiToken": []
+          },
           {
             "adminToken": []
           }
@@ -413,13 +493,17 @@
           "401": {
             "$ref": "#/components/responses/Problem"
           },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
           "404": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "x-openasy-role": "editor"
       }
     },
     "/api/v1/sessions": {
@@ -429,8 +513,14 @@
           "Sessions"
         ],
         "summary": "List live sessions",
-        "description": "From servers that reported in the last minute.",
+        "description": "From servers that reported in the last minute.\n\nNeeds the viewer role.",
         "security": [
+          {
+            "session": []
+          },
+          {
+            "apiToken": []
+          },
           {
             "adminToken": []
           }
@@ -449,10 +539,14 @@
           "401": {
             "$ref": "#/components/responses/Problem"
           },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "x-openasy-role": "viewer"
       }
     },
     "/api/v1/sessions/{server}/{device}": {
@@ -462,8 +556,14 @@
           "Sessions"
         ],
         "summary": "Disconnect a session",
-        "description": "The server ends it at its next heartbeat, within 15 seconds. A device that is still allowed may connect again; revoke it or suspend the person to keep it out.",
+        "description": "The server ends it at its next heartbeat, within 15 seconds. A device that is still allowed may connect again; revoke it or suspend the person to keep it out.\n\nNeeds the editor role.",
         "security": [
+          {
+            "session": []
+          },
+          {
+            "apiToken": []
+          },
           {
             "adminToken": []
           }
@@ -502,13 +602,17 @@
           "401": {
             "$ref": "#/components/responses/Problem"
           },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
           "404": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "x-openasy-role": "editor"
       }
     },
     "/api/v1/groups": {
@@ -519,6 +623,12 @@
         ],
         "summary": "List groups",
         "security": [
+          {
+            "session": []
+          },
+          {
+            "apiToken": []
+          },
           {
             "adminToken": []
           }
@@ -537,10 +647,15 @@
           "401": {
             "$ref": "#/components/responses/Problem"
           },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "x-openasy-role": "viewer",
+        "description": "Needs the viewer role."
       },
       "post": {
         "operationId": "createGroup",
@@ -549,6 +664,12 @@
         ],
         "summary": "Add a group",
         "security": [
+          {
+            "session": []
+          },
+          {
+            "apiToken": []
+          },
           {
             "adminToken": []
           }
@@ -580,6 +701,9 @@
           "401": {
             "$ref": "#/components/responses/Problem"
           },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
           "409": {
             "$ref": "#/components/responses/Problem"
           },
@@ -589,7 +713,9 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "x-openasy-role": "admin",
+        "description": "Needs the admin role."
       }
     },
     "/api/v1/groups/{id}": {
@@ -600,6 +726,12 @@
         ],
         "summary": "Delete a group",
         "security": [
+          {
+            "session": []
+          },
+          {
+            "apiToken": []
+          },
           {
             "adminToken": []
           }
@@ -622,13 +754,18 @@
           "401": {
             "$ref": "#/components/responses/Problem"
           },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
           "404": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "x-openasy-role": "admin",
+        "description": "Needs the admin role."
       }
     },
     "/api/v1/ip-groups": {
@@ -639,6 +776,12 @@
         ],
         "summary": "List IP groups",
         "security": [
+          {
+            "session": []
+          },
+          {
+            "apiToken": []
+          },
           {
             "adminToken": []
           }
@@ -657,10 +800,15 @@
           "401": {
             "$ref": "#/components/responses/Problem"
           },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "x-openasy-role": "viewer",
+        "description": "Needs the viewer role."
       },
       "post": {
         "operationId": "createIpGroup",
@@ -669,6 +817,12 @@
         ],
         "summary": "Add an IP group",
         "security": [
+          {
+            "session": []
+          },
+          {
+            "apiToken": []
+          },
           {
             "adminToken": []
           }
@@ -700,6 +854,9 @@
           "401": {
             "$ref": "#/components/responses/Problem"
           },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
           "409": {
             "$ref": "#/components/responses/Problem"
           },
@@ -709,7 +866,9 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "x-openasy-role": "admin",
+        "description": "Needs the admin role."
       }
     },
     "/api/v1/ip-groups/{id}": {
@@ -720,6 +879,12 @@
         ],
         "summary": "Get an IP group",
         "security": [
+          {
+            "session": []
+          },
+          {
+            "apiToken": []
+          },
           {
             "adminToken": []
           }
@@ -749,13 +914,18 @@
           "401": {
             "$ref": "#/components/responses/Problem"
           },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
           "404": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "x-openasy-role": "viewer",
+        "description": "Needs the viewer role."
       },
       "patch": {
         "operationId": "updateIpGroup",
@@ -763,8 +933,14 @@
           "Access"
         ],
         "summary": "Change an IP group",
-        "description": "Lists you send replace the current ones.",
+        "description": "Lists you send replace the current ones.\n\nNeeds the admin role.",
         "security": [
+          {
+            "session": []
+          },
+          {
+            "apiToken": []
+          },
           {
             "adminToken": []
           }
@@ -807,6 +983,9 @@
           "401": {
             "$ref": "#/components/responses/Problem"
           },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
           "404": {
             "$ref": "#/components/responses/Problem"
           },
@@ -816,7 +995,8 @@
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "x-openasy-role": "admin"
       },
       "delete": {
         "operationId": "deleteIpGroup",
@@ -825,6 +1005,12 @@
         ],
         "summary": "Delete an IP group",
         "security": [
+          {
+            "session": []
+          },
+          {
+            "apiToken": []
+          },
           {
             "adminToken": []
           }
@@ -847,13 +1033,18 @@
           "401": {
             "$ref": "#/components/responses/Problem"
           },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
           "404": {
             "$ref": "#/components/responses/Problem"
           },
           "503": {
             "$ref": "#/components/responses/Problem"
           }
-        }
+        },
+        "x-openasy-role": "admin",
+        "description": "Needs the admin role."
       }
     },
     "/api/v1/servers": {
@@ -863,7 +1054,7 @@
           "Servers"
         ],
         "summary": "List VPN servers",
-        "description": "Every vpn-server agent that has reported to this manager, with its last heartbeat.",
+        "description": "Every vpn-server agent that has reported to this manager, with its last heartbeat.\n\nNeeds the viewer role.",
         "responses": {
           "200": {
             "description": "Known servers, ordered by id.",
@@ -878,15 +1069,25 @@
           "401": {
             "$ref": "#/components/responses/Problem"
           },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
           "503": {
             "$ref": "#/components/responses/Problem"
           }
         },
         "security": [
           {
+            "session": []
+          },
+          {
+            "apiToken": []
+          },
+          {
             "adminToken": []
           }
-        ]
+        ],
+        "x-openasy-role": "viewer"
       }
     },
     "/api/v1/servers/heartbeat": {
@@ -1096,6 +1297,17 @@
   },
   "components": {
     "securitySchemes": {
+      "session": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-openasy-session",
+        "description": "The browser session after signing in (`openasy-session` when vpn-manager runs on plain http://localhost). Requests that change something must come from the vpn-manager origin."
+      },
+      "apiToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "An API token created under Settings → API tokens (`oa_vpn_...`): one role, always an expiry (ADR 0003)."
+      },
       "serverToken": {
         "type": "http",
         "scheme": "bearer",
@@ -1104,7 +1316,8 @@
       "adminToken": {
         "type": "http",
         "scheme": "bearer",
-        "description": "`VPN_ADMIN_TOKEN`, until sign-in exists (ADR 0002)."
+        "description": "Deprecated: `VPN_ADMIN_TOKEN`, one shared token with the admin role and no expiry. Use an API token instead.",
+        "x-deprecated": true
       }
     },
     "responses": {
@@ -1323,7 +1536,14 @@
               "not-found",
               "conflict",
               "not-configured",
-              "internal-error"
+              "internal-error",
+              "unauthenticated",
+              "invalid-credentials",
+              "mfa-required",
+              "mfa-setup-required",
+              "forbidden",
+              "cross-site",
+              "rate-limited"
             ]
           }
         }
