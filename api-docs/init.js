@@ -1,4 +1,4 @@
-// Swagger UI for this vpn-manager's own API. Nothing is fetched from outside this server.
+// Swagger UI for this vpn's own API. Nothing is fetched from outside this server.
 window.SwaggerUIBundle({
   url: "/api/openapi.json",
   dom_id: "#swagger",

@@ -1,32 +1,32 @@
-# VPN: the manager (API and web UI) plus OpenVPN server agents on the same host.
+# VPN: vpn (API and web UI) plus vpn-server, which runs OpenVPN, on the same host.
 # Each vpn-server listens on one protocol and port; run one per port you need.
 #
 #   export VPN_SERVER_TOKEN=$(openssl rand -hex 32)
 #   export VPN_PUBLIC_HOST=vpn.example.com   # the name or IP clients connect to
 #   openssl rand -hex 32 > openasy-kek       # encrypts sign-in secrets (ADR 0021); keep it with your backups
 #   docker compose up -d
-#   docker compose logs vpn-manager | grep 'no owner yet'   # the one-time link that creates the owner account
+#   docker compose logs vpn | grep 'no owner yet'   # the one-time link that creates the owner account
 #
 # The CA key is still stored unencrypted in the database: protect the volume and its backups.
 services:
-  vpn-manager:
-    image: ghcr.io/openasy/vpn-manager:0.3.0
+  vpn:
+    image: ghcr.io/openasy/vpn:0.4.0
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"   # UI and API; put a TLS proxy in front to reach it from elsewhere
     volumes:
-      - vpn-manager-data:/data   # SQLite database, CA and settings
+      - vpn-data:/data   # SQLite database, CA and settings
     secrets:
       - openasy-kek   # mounted at /run/secrets/openasy-kek
     environment:
-      # The address people open vpn-manager at; with a TLS proxy in front, its https:// URL.
-      VPN_MANAGER_PUBLIC_URL: ${VPN_MANAGER_PUBLIC_URL:-http://localhost:8080}
+      # The address people open vpn at; with a TLS proxy in front, its https:// URL.
+      VPN_PUBLIC_URL: ${VPN_PUBLIC_URL:-http://localhost:8080}
       VPN_SERVER_TOKEN: ${VPN_SERVER_TOKEN:?set VPN_SERVER_TOKEN}
       VPN_PUBLIC_HOST: ${VPN_PUBLIC_HOST:?set VPN_PUBLIC_HOST}
       VPN_NETWORK: 10.8.0.0/24
 
   vpn-server:
-    image: ghcr.io/openasy/vpn-server:0.3.0
+    image: ghcr.io/openasy/vpn-server:0.4.0
     restart: unless-stopped
     cap_add:
       - NET_ADMIN
@@ -37,18 +37,18 @@ services:
     ports:
       - "1194:1194/udp"
     environment:
-      VPN_MANAGER_URL: http://vpn-manager:8080
+      VPN_URL: http://vpn:8080
       VPN_SERVER_TOKEN: ${VPN_SERVER_TOKEN:?set VPN_SERVER_TOKEN}
       VPN_SERVER_ID: edge-1
       OPENVPN_PROTO: udp
       OPENVPN_PORT: "1194"
     depends_on:
-      - vpn-manager
+      - vpn
 
   # The same server on TCP 443, for networks that block everything except HTTPS.
   # Client configs list it after UDP, so clients fall back to it. Remove it if you do not need it.
   vpn-server-tcp:
-    image: ghcr.io/openasy/vpn-server:0.3.0
+    image: ghcr.io/openasy/vpn-server:0.4.0
     restart: unless-stopped
     cap_add:
       - NET_ADMIN
@@ -59,16 +59,16 @@ services:
     ports:
       - "443:443/tcp"
     environment:
-      VPN_MANAGER_URL: http://vpn-manager:8080
+      VPN_URL: http://vpn:8080
       VPN_SERVER_TOKEN: ${VPN_SERVER_TOKEN:?set VPN_SERVER_TOKEN}
       VPN_SERVER_ID: edge-1-tcp
       OPENVPN_PROTO: tcp
       OPENVPN_PORT: "443"
     depends_on:
-      - vpn-manager
+      - vpn
 
 volumes:
-  vpn-manager-data:
+  vpn-data:
 
 secrets:
   openasy-kek:

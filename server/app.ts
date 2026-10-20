@@ -12,7 +12,7 @@ export interface AppOptions {
   db: DatabaseSync;
   vpn: Vpn;
   version: string;
-  /** Shared token the vpn-server agents send; their requests are refused when unset. */
+  /** Shared token the vpn-server servers send; their requests are refused when unset. */
   serverToken?: string;
   /** Sign-in, sessions, members and API tokens (ADR 0002, 0003). */
   auth: Auth;
@@ -130,7 +130,7 @@ function tokenMatches(header: string | undefined, expected: string | undefined):
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-/** The role a route needs (ADR 0003), or "server" for the vpn-server agents. */
+/** The role a route needs (ADR 0003), or "server" for vpn-server. */
 type Access = "none" | "server" | Role;
 interface Ctx {
   req: IncomingMessage;
@@ -194,9 +194,9 @@ export function createApp({ db, vpn, version, auth, serverToken, adminToken, web
   };
 
   const routes: Route[] = [
-    { method: "GET", path: "/api/v1/version", auth: "none", handle: () => ({ product: "vpn-manager", version }) },
+    { method: "GET", path: "/api/v1/version", auth: "none", handle: () => ({ product: "vpn", version }) },
 
-    // Servers and their agents.
+    // Servers: vpn-server reports here and pulls its config.
     {
       method: "GET",
       path: "/api/v1/servers",
@@ -225,17 +225,17 @@ export function createApp({ db, vpn, version, auth, serverToken, adminToken, web
         ) {
           throw new HttpProblem(422, "invalid-body", "Expected { id, version, listen?, openvpnRunning, configVersion? }.");
         }
-        // ADR 0019: an agent always has the same version as its product.
-        if (agentVersion !== version) throw new HttpProblem(409, "version-mismatch", `vpn-server ${agentVersion} does not match vpn-manager ${version}; install vpn-server ${version}`);
+        // ADR 0019: vpn-server always has the same version as vpn.
+        if (agentVersion !== version) throw new HttpProblem(409, "version-mismatch", `vpn-server ${agentVersion} does not match vpn ${version}; install vpn-server ${version}`);
         const sessions = parseSessions(raw.sessions);
         upsertServer.run(id, agentVersion, listen ?? null, openvpnRunning ? 1 : 0, configVersion ?? null, new Date().toISOString());
         vpn.recordSessions(id, sessions);
-        // Sessions to end now; the agent also ends any session whose device is no longer in its config.
+        // Sessions to end now; vpn-server also ends any session whose device is no longer in its config.
         json(res, 202, { status: "accepted", disconnect: vpn.pendingDisconnects(id) });
       },
     },
     {
-      // The agent pulls what its server must run (ADR 0022, 0023). ETag lets it skip unchanged configs.
+      // vpn-server pulls what it must run (ADR 0022, 0023). ETag lets it skip unchanged configs.
       method: "GET",
       path: "/api/v1/servers/:id/config",
       auth: "server",
@@ -290,7 +290,7 @@ export function createApp({ db, vpn, version, auth, serverToken, adminToken, web
   function authorize(req: IncomingMessage, access: Access) {
     if (access === "none") return;
     if (access === "server") {
-      if (!serverToken) throw new HttpProblem(503, "not-configured", "Set VPN_SERVER_TOKEN on vpn-manager to use this endpoint.");
+      if (!serverToken) throw new HttpProblem(503, "not-configured", "Set VPN_SERVER_TOKEN on vpn to use this endpoint.");
       if (!tokenMatches(req.headers.authorization, serverToken)) throw new HttpProblem(401, "invalid-token", "Send VPN_SERVER_TOKEN as a bearer token.");
       return;
     }

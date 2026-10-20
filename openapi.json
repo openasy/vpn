@@ -1,10 +1,10 @@
 {
   "openapi": "3.1.1",
   "info": {
-    "title": "OpenAsy VPN manager API",
-    "version": "0.3.0",
+    "title": "OpenAsy VPN API",
+    "version": "0.4.0",
     "summary": "Servers, users and access for OpenVPN.",
-    "description": "Every screen of vpn-manager uses this API, and so can your scripts (ADR 0014). Within `/api/v1` changes are additive only; anything removed is deprecated first (ADR 0024). Errors use Problem Details (RFC 9457).\n\nAgents take `VPN_SERVER_TOKEN`. Everything else takes the session of a signed-in person or an API token, and each operation names the role it needs (`x-openasy-role`: viewer, editor, admin; ADR 0003).\n\nSign-in, members and API tokens are under `/api/v1/auth`, provided by [@openasy/auth](https://github.com/openasy/auth#routes).",
+    "description": "Every screen of vpn uses this API, and so can your scripts (ADR 0014). Within `/api/v1` changes are additive only; anything removed is deprecated first (ADR 0024). Errors use Problem Details (RFC 9457).\n\nvpn-server takes `VPN_SERVER_TOKEN`. Everything else takes the session of a signed-in person or an API token, and each operation names the role it needs (`x-openasy-role`: viewer, editor, admin; ADR 0003).\n\nSign-in, members and API tokens are under `/api/v1/auth`, provided by [@openasy/auth](https://github.com/openasy/auth#routes).",
     "license": {
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
@@ -13,7 +13,7 @@
   "servers": [
     {
       "url": "/",
-      "description": "This vpn-manager"
+      "description": "This VPN"
     }
   ],
   "tags": [
@@ -31,11 +31,11 @@
     },
     {
       "name": "Servers",
-      "description": "OpenVPN servers run by vpn-server agents."
+      "description": "OpenVPN servers run by vpn-server."
     },
     {
       "name": "Product",
-      "description": "Version and health of this vpn-manager."
+      "description": "Version and health of this VPN."
     }
   ],
   "paths": {
@@ -1054,7 +1054,7 @@
           "Servers"
         ],
         "summary": "List VPN servers",
-        "description": "Every vpn-server agent that has reported to this manager, with its last heartbeat.\n\nNeeds the viewer role.",
+        "description": "Every vpn-server that has reported here, with its last heartbeat.\n\nNeeds the viewer role.",
         "responses": {
           "200": {
             "description": "Known servers, ordered by id.",
@@ -1097,7 +1097,7 @@
           "Servers"
         ],
         "summary": "Report a server's state",
-        "description": "Called by vpn-server every 15 seconds with its live sessions. The answer lists sessions to end now. The agent must have the same version as the manager (ADR 0019).",
+        "description": "Called by vpn-server every 15 seconds with its live sessions. The answer lists sessions to end now. vpn-server must have the same version as vpn (ADR 0019).",
         "security": [
           {
             "serverToken": []
@@ -1301,7 +1301,7 @@
         "type": "apiKey",
         "in": "cookie",
         "name": "__Host-openasy-session",
-        "description": "The browser session after signing in (`openasy-session` when vpn-manager runs on plain http://localhost). Requests that change something must come from the vpn-manager origin."
+        "description": "The browser session after signing in (`openasy-session` when vpn runs on plain http://localhost). Requests that change something must come from the vpn origin."
       },
       "apiToken": {
         "type": "http",
@@ -1311,7 +1311,7 @@
       "serverToken": {
         "type": "http",
         "scheme": "bearer",
-        "description": "`VPN_SERVER_TOKEN`, shared with vpn-server agents."
+        "description": "`VPN_SERVER_TOKEN`, shared with vpn-server."
       },
       "adminToken": {
         "type": "http",
@@ -1341,7 +1341,7 @@
         ],
         "properties": {
           "product": {
-            "const": "vpn-manager"
+            "const": "vpn"
           },
           "version": {
             "type": "string",
@@ -1387,7 +1387,7 @@
               "string",
               "null"
             ],
-            "description": "Version of the config the agent applies; compare with GET /api/v1/servers/{id}/config."
+            "description": "Version of the config vpn-server applies; compare with GET /api/v1/servers/{id}/config."
           }
         }
       },
@@ -1453,7 +1453,7 @@
               "string",
               "null"
             ],
-            "description": "Version of the config the agent applied."
+            "description": "Version of the config vpn-server applied."
           },
           "sessions": {
             "type": "array",
@@ -1522,7 +1522,7 @@
           "detail": {
             "type": "string",
             "examples": [
-              "vpn-server 0.0.9 does not match vpn-manager 0.1.0; install vpn-server 0.1.0"
+              "vpn-server 0.0.9 does not match vpn 0.1.0; install vpn-server 0.1.0"
             ]
           },
           "code": {

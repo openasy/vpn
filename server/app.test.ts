@@ -28,13 +28,13 @@ describe("health and metrics", () => {
   it("exposes Prometheus metrics", async () => {
     const res = await fetch(`${base}/metrics`);
     expect(res.headers.get("content-type")).toContain("text/plain");
-    expect(await res.text()).toContain('openasy_build_info{product="vpn-manager",version="1.2.3"} 1');
+    expect(await res.text()).toContain('openasy_build_info{product="vpn",version="1.2.3"} 1');
   });
 
   it("sets security headers", async () => {
     const res = await fetch(`${base}/api/v1/version`);
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
-    expect(await res.json()).toEqual({ product: "vpn-manager", version: "1.2.3" });
+    expect(await res.json()).toEqual({ product: "vpn", version: "1.2.3" });
   });
 });
 

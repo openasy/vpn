@@ -1,10 +1,11 @@
-# vpn-manager
+# vpn
 
 The [OpenAsy](https://github.com/openasy) VPN product: API and web UI for OpenVPN servers, in one container with one version.
-OpenVPN itself runs on hosts as the separate [vpn-server](https://github.com/openasy/vpn-server) agent.
+OpenVPN itself runs on hosts as the separate [vpn-server](https://github.com/openasy/vpn-server), which carries the
+VPN traffic and takes its config from `vpn` (ADR 0018).
 
 People sign in with an account (password plus authenticator app or passkey), with a passkey alone, or through your
-identity provider (OIDC). Each person has a role in this vpn-manager; scripts use API tokens. See [Sign-in](#sign-in).
+identity provider (OIDC). Each person has a role in this VPN; scripts use API tokens. See [Sign-in](#sign-in).
 
 > The CA key is still stored unencrypted in the database (ADR 0021): protect the `/data` volume and its backups.
 
@@ -15,28 +16,28 @@ export VPN_SERVER_TOKEN=$(openssl rand -hex 32)
 export VPN_PUBLIC_HOST=vpn.example.com   # the name or IP clients connect to
 openssl rand -hex 32 > openasy-kek
 docker compose up -d
-docker compose logs vpn-manager | grep 'no owner yet'
+docker compose logs vpn | grep 'no owner yet'
 ```
 
 Open the link from the log once to create the owner account; there is no default password (ADR 0013).
 
-[`compose.yaml`](./compose.yaml) starts `ghcr.io/openasy/vpn-manager` and two `ghcr.io/openasy/vpn-server` agents, one on
+[`compose.yaml`](./compose.yaml) starts `ghcr.io/openasy/vpn` and two `ghcr.io/openasy/vpn-server` servers, one on
 UDP 1194 and one on TCP 443. The UI and API are on http://localhost:8080; the API reference with *Try it out* is at
 http://localhost:8080/api/docs/ (click *Authorize* and paste an API token).
 
 | Variable | Default | |
 | --- | --- | --- |
 | `PORT` | `8080` | HTTP port |
-| `VPN_MANAGER_DB` | `/data/vpn-manager.db` | SQLite file (WAL), on the `/data` volume |
-| `VPN_MANAGER_PUBLIC_URL` | `http://localhost:8080` | The address people open, with `https://` behind your TLS proxy. Cookies, passkeys and OIDC redirects use it |
-| `VPN_SERVER_TOKEN` | | Token vpn-server agents send; they are refused without it |
+| `VPN_DB` | `/data/vpn.db` | SQLite file (WAL), on the `/data` volume |
+| `VPN_PUBLIC_URL` | `http://localhost:8080` | The address people open, with `https://` behind your TLS proxy. Cookies, passkeys and OIDC redirects use it |
+| `VPN_SERVER_TOKEN` | | Token the vpn-server servers send; they are refused without it |
 | `VPN_SECRETS_KEY_FILE` | `/run/secrets/openasy-kek` | 32-byte key that encrypts sign-in secrets in the database (ADR 0021) |
 | `VPN_PASSWORD_SIGN_IN` | `true` | `false` when everyone signs in through OIDC |
 | `VPN_OIDC_*` | | Sign-in through your identity provider, see [Sign-in](#sign-in) |
 | `VPN_ADMIN_TOKEN` | | Deprecated: one shared admin token without an expiry, for scripts from before sign-in. Use an API token |
 | `VPN_PUBLIC_HOST` | | Host name or IP clients connect to; needed to add devices |
 | `VPN_NETWORK` | `10.8.0.0/24` | Address pool for clients; each device gets a fixed address from it |
-| `VPN_MANAGER_HEADLESS` | `false` | `true` serves only the API |
+| `VPN_HEADLESS` | `false` | `true` serves only the API |
 
 ## Sign-in
 
@@ -48,7 +49,7 @@ Sign-in comes from [@openasy/auth](https://github.com/openasy/auth), the same in
 - **Members**: admins invite people under Settings → Members and send them the one-time link (there is no email yet).
   These are the people who manage the VPN, not the VPN users under `/api/v1/people`.
 - **API tokens**: Settings → API tokens. One role each, an expiry within a year, shown once.
-- **OIDC**: register vpn-manager with the redirect URI `<VPN_MANAGER_PUBLIC_URL>/api/v1/auth/oidc/sso/callback` and set
+- **OIDC**: register `vpn` with the redirect URI `<VPN_PUBLIC_URL>/api/v1/auth/oidc/sso/callback` and set
   `VPN_OIDC_ISSUER`, `VPN_OIDC_CLIENT_ID` and `VPN_OIDC_CLIENT_SECRET`. Optional: `VPN_OIDC_NAME`, `VPN_OIDC_SCOPES`,
   `VPN_OIDC_GROUPS_CLAIM`, `VPN_OIDC_ROLE_MAPPING` (`vpn-admins=admin,staff=viewer`), `VPN_OIDC_DEFAULT_ROLE` and
   `VPN_OIDC_ALLOWED_DOMAINS`, as in every OpenAsy product.
@@ -64,13 +65,13 @@ curl -sH "$AUTH" $API/people -d '{"name":"Dana Kim","email":"dana@example.com","
 curl -sH "$AUTH" $API/people/<person id>/devices -d '{"name":"Laptop"}' | jq -r .ovpn > dana-laptop.ovpn
 ```
 
-The `.ovpn` file holds the device's private key and is shown only once; vpn-manager does not keep the key. Import it
+The `.ovpn` file holds the device's private key and is shown only once; `vpn` does not keep the key. Import it
 into any OpenVPN client. Servers pick up a new device within one heartbeat (15 seconds), so a connection right after
 download may be refused once.
 
 How it works:
 
-- vpn-manager holds the CA and issues one certificate and one fixed VPN address per device.
+- `vpn` holds the CA and issues one certificate and one fixed VPN address per device.
 - Each vpn-server pulls the config for its server from `GET /api/v1/servers/{id}/config` (with `ETag`, so an unchanged
   config costs a 304), writes it for OpenVPN and restarts OpenVPN only when certificates or the server settings change.
 - Only listed devices may connect (`ccd-exclusive`). Revoking a device puts it on the CRL, which OpenVPN checks on every
@@ -81,7 +82,7 @@ How it works:
 - Servers report live sessions every heartbeat: `GET /api/v1/sessions`. A device that is revoked, suspended or deleted
   is disconnected at the next heartbeat. `DELETE /api/v1/sessions/{server}/{device}` ends one session; the device may
   reconnect if it is still allowed.
-- A client config lists the servers vpn-manager knows when the file is created, so start the servers before adding devices.
+- A client config lists the servers `vpn` knows when the file is created, so start the servers before adding devices.
 
 Not built yet: the people, access and sessions screens in the UI, and the CLI.
 
@@ -106,28 +107,48 @@ operation and fails if a response does not match it. Errors are RFC 9457 Problem
 (`application/problem+json`) with a stable `code`. The reference is also on the site, without "Try it":
 https://openasy.github.io/products/vpn/api
 
+## Upgrade from vpn-manager
+
+Until 0.4.0 this product was called vpn-manager (ADR 0018). The image is now `ghcr.io/openasy/vpn`; the old images stay
+published but get no new versions.
+
+- `VPN_MANAGER_PUBLIC_URL`, `VPN_MANAGER_DB` and `VPN_MANAGER_HEADLESS` are now `VPN_PUBLIC_URL`, `VPN_DB` and
+  `VPN_HEADLESS`; vpn-server's `VPN_MANAGER_URL` is now `VPN_URL`. The old names still work, with a warning in the
+  log, until 0.5.0.
+- `/data/vpn-manager.db` is renamed to `/data/vpn.db` on the first start. Nothing else in it changes.
+- In `compose.yaml` the service is now `vpn` and the volume `vpn-data`. A new volume name means an empty volume, so
+  copy the old one first, or the CA and every device are gone:
+
+```bash
+docker compose down
+docker volume create <project>_vpn-data
+docker run --rm -v <project>_vpn-manager-data:/from -v <project>_vpn-data:/to alpine cp -a /from/. /to/
+```
+
+`docker volume ls` shows the name of the old volume.
+
 ## Verify an image
 
 Images are signed with cosign (keyless), carry an SPDX SBOM attestation and SLSA level 3 provenance.
 
 ```bash
-cosign verify ghcr.io/openasy/vpn-manager:0.3.0 \
-  --certificate-identity-regexp '^https://github.com/openasy/vpn-manager/' \
+cosign verify ghcr.io/openasy/vpn:0.4.0 \
+  --certificate-identity-regexp '^https://github.com/openasy/vpn/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-cosign verify-attestation --type spdxjson ghcr.io/openasy/vpn-manager:0.3.0 \
-  --certificate-identity-regexp '^https://github.com/openasy/vpn-manager/' \
+cosign verify-attestation --type spdxjson ghcr.io/openasy/vpn:0.4.0 \
+  --certificate-identity-regexp '^https://github.com/openasy/vpn/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-slsa-verifier verify-image ghcr.io/openasy/vpn-manager@sha256:<digest> --source-uri github.com/openasy/vpn-manager
+slsa-verifier verify-image ghcr.io/openasy/vpn@sha256:<digest> --source-uri github.com/openasy/vpn
 ```
 
 ## Develop
 
 ```bash
 npm ci
-npm start      # API on :8080 (set VPN_MANAGER_DB=./data/vpn-manager.db)
+npm start      # API on :8080 (set VPN_DB=./data/vpn.db)
 npm run dev    # web UI on :5173, proxies /api
 npm run typecheck && npm test
-e2e/run.sh     # needs Docker and the vpn-manager:dev and vpn-server:dev images: a real OpenVPN client connects,
+e2e/run.sh     # needs Docker and the vpn:dev and vpn-server:dev images: a real OpenVPN client connects,
                # reaches an allowed port, is blocked on another, is disconnected, and is refused after revoke
 ```
 
@@ -137,7 +158,7 @@ Node runs the TypeScript sources in `server/` directly; there is no build step f
 
 1. Set `version` in `package.json`, merge to `main`.
 2. Push the tag: `git tag v0.1.0 && git push origin v0.1.0`.
-3. GitHub Actions tests, builds `linux/amd64` and `linux/arm64`, pushes `ghcr.io/openasy/vpn-manager:0.1.0` and `:0.1` to GitHub Container Registry
+3. GitHub Actions tests, builds `linux/amd64` and `linux/arm64`, pushes `ghcr.io/openasy/vpn:0.1.0` and `:0.1` to GitHub Container Registry
    (never `latest`), signs it, attaches the SBOM and provenance, and creates the GitHub release.
 4. Release vpn-server with the same version.
 

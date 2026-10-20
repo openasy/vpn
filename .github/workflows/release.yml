@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  IMAGE: ghcr.io/openasy/vpn-manager
+  IMAGE: ghcr.io/openasy/vpn
 
 jobs:
   test:
@@ -81,7 +81,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
           labels: |
-            org.opencontainers.image.title=vpn-manager
+            org.opencontainers.image.title=vpn
             org.opencontainers.image.vendor=OpenAsy
             org.openasy.lts=${{ needs.test.outputs.lts }}
             org.openasy.lts.eol=${{ needs.test.outputs.lts-eol }}
@@ -123,7 +123,7 @@ jobs:
     # Reusable workflows must be referenced by tag, not SHA, for SLSA L3.
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v2.1.0
     with:
-      image: ghcr.io/openasy/vpn-manager
+      image: ghcr.io/openasy/vpn
       digest: ${{ needs.image.outputs.digest }}
       registry-username: ${{ github.actor }}
     secrets:
@@ -142,6 +142,6 @@ jobs:
             ```bash
             docker pull ${{ env.IMAGE }}:${{ github.ref_name }}
             cosign verify ${{ env.IMAGE }}@${{ needs.image.outputs.digest }} \
-              --certificate-identity-regexp '^https://github.com/openasy/vpn-manager/' \
+              --certificate-identity-regexp '^https://github.com/openasy/vpn/' \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com
             ```

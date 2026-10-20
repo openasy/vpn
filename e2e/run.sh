@@ -1,6 +1,6 @@
 #!/bin/bash
-# End-to-end: a real OpenVPN client connects through vpn-server, configured by vpn-manager.
-# Needs Docker with /dev/net/tun and the vpn-manager:dev and vpn-server:dev images. Exits non-zero on failure.
+# End-to-end: a real OpenVPN client connects through vpn-server, configured by vpn.
+# Needs Docker with /dev/net/tun and the vpn:dev and vpn-server:dev images. Exits non-zero on failure.
 set -u
 D=$(mktemp -d)
 FAIL=0
@@ -8,7 +8,7 @@ fail() { echo "FAIL: $*"; FAIL=1; }
 A="Authorization: Bearer admin-e2e"
 api() { curl -s -H "$A" -H "content-type: application/json" "$@"; }
 jsonq() { node -pe "const d=JSON.parse(require('fs').readFileSync(0)); $1"; }
-cleanup() { docker rm -f e2e-manager e2e-udp e2e-tcp e2e-target e2e-client >/dev/null 2>&1; docker network rm e2e-pub e2e-int >/dev/null 2>&1; }
+cleanup() { docker rm -f e2e-vpn e2e-udp e2e-tcp e2e-target e2e-client >/dev/null 2>&1; docker network rm e2e-pub e2e-int >/dev/null 2>&1; }
 cleanup
 docker network create e2e-pub >/dev/null
 docker network create --subnet 172.30.20.0/24 e2e-int >/dev/null
@@ -17,10 +17,10 @@ docker run -d --name e2e-target --network e2e-int --ip 172.30.20.10 vpn-server:d
   const h = require('http');
   h.createServer((q, s) => s.end('hello from the internal network')).listen(80);
   h.createServer((q, s) => s.end('port 8081 should be blocked')).listen(8081);" >/dev/null
-docker run -d --name e2e-manager --network e2e-pub -p 18090:8080 -e VPN_SERVER_TOKEN=server-e2e -e VPN_ADMIN_TOKEN=admin-e2e -e VPN_PUBLIC_HOST=vpn.test vpn-manager:dev >/dev/null
+docker run -d --name e2e-vpn --network e2e-pub -p 18090:8080 -e VPN_SERVER_TOKEN=server-e2e -e VPN_ADMIN_TOKEN=admin-e2e -e VPN_PUBLIC_HOST=vpn.test vpn:dev >/dev/null
 agent() { # name proto port alias
   docker run -d --name "$1" --network e2e-pub --network-alias "$4" --cap-add NET_ADMIN --device /dev/net/tun --sysctl net.ipv4.ip_forward=1 \
-    -e VPN_MANAGER_URL=http://e2e-manager:8080 -e VPN_SERVER_TOKEN=server-e2e -e VPN_SERVER_ID="$1" -e OPENVPN_PROTO="$2" -e OPENVPN_PORT="$3" -e HEARTBEAT_SECONDS=2 vpn-server:dev >/dev/null
+    -e VPN_URL=http://e2e-vpn:8080 -e VPN_SERVER_TOKEN=server-e2e -e VPN_SERVER_ID="$1" -e OPENVPN_PROTO="$2" -e OPENVPN_PORT="$3" -e HEARTBEAT_SECONDS=2 vpn-server:dev >/dev/null
   docker network connect e2e-int "$1"
 }
 for _ in $(seq 1 30); do curl -sf localhost:18090/readyz >/dev/null && break; sleep 0.5; done
@@ -70,15 +70,15 @@ echo "[UDP] tcp/8081, not allowed: $out"
 [[ "$out" == BLOCKED* ]] || fail "a port outside the IP group was reachable"
 
 for _ in $(seq 1 10); do [ -n "$(sessions)" ] && break; sleep 1; done
-echo "[UDP] session in vpn-manager: $(sessions)"
+echo "[UDP] session in vpn: $(sessions)"
 [ "$(sessions)" = "e2e-udp:Dana Kim" ] || fail "the session was not listed"
 
-echo "--- disconnect the session from vpn-manager: the device is still allowed, so it reconnects"
+echo "--- disconnect the session from vpn: the device is still allowed, so it reconnects"
 api -X DELETE "localhost:18090/api/v1/sessions/e2e-udp/$DEVICE" >/dev/null
 for _ in $(seq 1 20); do [ "$(completed)" -ge 2 ] && break; sleep 1; done
 echo "[UDP] connections completed: $(completed)"
 [ "$(completed)" -ge 2 ] || fail "the disconnected client did not reconnect"
-docker logs e2e-udp 2>&1 | grep -q '"reason":"disconnected from vpn-manager"' || fail "the server did not report ending the session"
+docker logs e2e-udp 2>&1 | grep -q '"reason":"disconnected from vpn"' || fail "the server did not report ending the session"
 
 echo "--- connect over TCP 443"
 client client-tcp.ovpn TCP || fail "TCP client did not connect"
@@ -98,7 +98,7 @@ echo "[UDP] after revoke: $out"
 docker logs e2e-udp 2>&1 | grep -q "certificate revoked" || fail "the server did not refuse the revoked certificate on reconnect"
 echo "[UDP] reconnect refused: $(docker logs e2e-udp 2>&1 | grep -c 'certificate revoked') time(s), certificate revoked"
 for _ in $(seq 1 10); do [ -z "$(sessions)" ] && break; sleep 1; done
-[ -z "$(sessions)" ] || fail "vpn-manager still lists the revoked device's session"
+[ -z "$(sessions)" ] || fail "vpn still lists the revoked device's session"
 
 [ "${KEEP:-}" = "1" ] || cleanup
 rm -rf "$D"

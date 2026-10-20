@@ -10,7 +10,7 @@ export function renderMetrics(version: string, servers: number, sessions: number
   const lines = [
     "# HELP openasy_build_info Build information.",
     "# TYPE openasy_build_info gauge",
-    `openasy_build_info{product="vpn-manager",version="${version}"} 1`,
+    `openasy_build_info{product="vpn",version="${version}"} 1`,
     "# HELP openasy_http_requests_total HTTP requests handled.",
     "# TYPE openasy_http_requests_total counter",
     ...[...requests].map(([labels, n]) => `openasy_http_requests_total{${labels}} ${n}`),

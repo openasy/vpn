@@ -6,7 +6,7 @@ import { openDb } from "./db.ts";
 
 describe("openDb", () => {
   it("uses WAL and migrates once", () => {
-    const path = join(mkdtempSync(join(tmpdir(), "vpn-manager-")), "nested", "vpn-manager.db");
+    const path = join(mkdtempSync(join(tmpdir(), "vpn-")), "nested", "vpn.db");
     const first = openDb(path);
     expect(first.prepare("PRAGMA journal_mode").get()).toEqual({ journal_mode: "wal" });
     first.close();

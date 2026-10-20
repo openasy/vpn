@@ -56,14 +56,14 @@ function ServersPage({ version }: { version?: string }) {
   const running = servers.filter((s) => s.openvpnRunning).length;
   return (
     <>
-      <PageHeader title="Servers" description={version ? `vpn-manager ${version}. Manage people and devices through the API at /api/docs/.` : undefined} />
+      <PageHeader title="Servers" description={version ? `VPN ${version}. Manage people and devices through the API at /api/docs/.` : undefined} />
       <KpiGrid>
         <KpiCard label="Servers" value={servers.length} />
         <KpiCard label="OpenVPN running" value={running} tone={running < servers.length ? "warning" : "success"} />
       </KpiGrid>
       <Panel title="Connected servers">
         {servers.length === 0 ? (
-          <EmptyState title="No servers yet">Start vpn-server with VPN_MANAGER_URL and VPN_SERVER_TOKEN pointing here.</EmptyState>
+          <EmptyState title="No servers yet">Start vpn-server with VPN_URL and VPN_SERVER_TOKEN pointing here.</EmptyState>
         ) : (
           <ul>
             {servers.map((s) => (
@@ -87,7 +87,7 @@ const parsePage = (hash: string): Page => {
 
 const SETTINGS = {
   account: ["Account", "Your profile, password, two-step verification and where you are signed in."],
-  members: ["Members", "Who can sign in to this vpn-manager, and with which role. Viewers see everything; editors also add people and devices and end sessions; admins also remove people and manage groups, IP groups, members and tokens."],
+  members: ["Members", "Who can sign in to this VPN, and with which role. Viewers see everything; editors also add people and devices and end sessions; admins also remove people and manage groups, IP groups, members and tokens."],
   tokens: ["API tokens", "For scripts. Each token has one role and an expiry; the secret is shown once."],
 } as const;
 
@@ -126,7 +126,7 @@ function Product() {
       {page === "servers" ? (
         <ServersPage version={version} />
       ) : page !== "account" && !can("admin") ? (
-        <EmptyState title="Admins only">Ask an admin of this vpn-manager for access.</EmptyState>
+        <EmptyState title="Admins only">Ask an admin of this VPN for access.</EmptyState>
       ) : (
         <>
           <PageHeader
