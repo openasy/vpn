@@ -6,6 +6,7 @@ import { createApp } from "./app.ts";
 import { openDb } from "./db.ts";
 import { createKeyring } from "./kek.ts";
 import { log } from "./log.ts";
+import { parseProducts } from "./products.ts";
 import { createVpn } from "./vpn.ts";
 
 const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
@@ -101,6 +102,8 @@ const auth = createAuth({
   // Audit log (ADR 0013): every sign-in, failure and change to members and tokens.
   onEvent: (event) => log(event.type === "sign-in-failed" || event.type === "session-ended" ? "warn" : "info", "auth", { event }),
 });
+const products = parseProducts(process.env.OPENASY_PRODUCTS);
+if (products.invalid.length) log("warn", "OPENASY_PRODUCTS: left out entries that are not id=https://address", { entries: products.invalid });
 const server = createServer(
   createApp({
     db,
@@ -112,6 +115,7 @@ const server = createServer(
     webDir: !headless && existsSync(webDir) ? webDir : undefined,
     docsDir: existsSync(docsDir) ? docsDir : undefined,
     openapi,
+    products: products.products,
   }),
 );
 

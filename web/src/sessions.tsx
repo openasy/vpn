@@ -13,7 +13,7 @@ export function SessionTable({ call, personId }: { call: Call; personId?: string
   const columns: Column<Session>[] = [
     ...(personId
       ? []
-      : [{ id: "person", header: "Person", cell: (s: Session) => (s.personId ? <a href={`#/people/${s.personId}`}>{s.personName}</a> : "Unknown device"), sortValue: (s: Session) => s.personName ?? "" } satisfies Column<Session>]),
+      : [{ id: "person", header: "Person", cell: (s: Session) => (s.personId ? <a href={`/people/${s.personId}`}>{s.personName}</a> : "Unknown device"), sortValue: (s: Session) => s.personName ?? "" } satisfies Column<Session>]),
     { id: "device", header: "Device", cell: (s) => s.deviceName ?? s.deviceId, sortValue: (s) => s.deviceName ?? "" },
     { id: "vpnIp", header: "VPN address", width: "120px", mono: true, cell: (s) => s.vpnIp },
     { id: "from", header: "From", width: "170px", mono: true, cell: (s) => s.realAddress },

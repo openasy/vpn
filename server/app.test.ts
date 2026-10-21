@@ -161,3 +161,13 @@ describe("server enrolment", () => {
     expect(await status("lag-1")).toMatchObject({ status: "version-mismatch" });
   });
 });
+
+describe("other products", () => {
+  it("lists the configured products to anyone signed in", async () => {
+    const products = [{ id: "infrastructure", url: "https://infra.example.com" }];
+    const linked = await startApp({ version: "1.2.3", products });
+    expect(await (await linked.admin("/api/v1/products")).json()).toEqual({ products });
+    expect((await fetch(`${linked.base}/api/v1/products`)).status).toBe(401);
+    await linked.close();
+  });
+});

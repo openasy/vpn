@@ -1,10 +1,10 @@
-import { Badge, Button, Callout, Checkbox, EmptyState, PageHeader, Panel, StatusBadge, TextField, type Column } from "@openasy/ui";
+import { Badge, Button, Callout, Checkbox, EmptyState, navigate, PageHeader, Panel, StatusBadge, TextField, type Column } from "@openasy/ui";
 import { useAuth } from "@openasy/auth/react";
 import { Ban, Download, Laptop, Plus, Trash2, UserCheck, UserX } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import type { Device, Group, Person } from "./api.ts";
 import { SessionTable } from "./sessions.tsx";
-import { ago, date, download, go, List, Problem, slug, useAction, useData, type Call } from "./shared.tsx";
+import { ago, date, download, List, Problem, slug, useAction, useData, type Call } from "./shared.tsx";
 
 function PersonStatus({ status }: { status: Person["status"] }) {
   return <StatusBadge tone={status === "active" ? "success" : "warning"}>{status === "active" ? "Active" : "Suspended"}</StatusBadge>;
@@ -28,7 +28,7 @@ export function PeoplePage({ call }: { call: Call }) {
   const groups = useData<{ groups: Group[] }>(call, "/api/v1/groups", 0);
   const [adding, setAdding] = useState(false);
   const columns: Column<Person>[] = [
-    { id: "name", header: "Name", cell: (p) => <a href={`#/people/${p.id}`}>{p.name}</a>, sortValue: (p) => p.name },
+    { id: "name", header: "Name", cell: (p) => <a href={`/people/${p.id}`}>{p.name}</a>, sortValue: (p) => p.name },
     { id: "email", header: "Email", cell: (p) => p.email, sortValue: (p) => p.email },
     { id: "status", header: "Status", width: "120px", cell: (p) => <PersonStatus status={p.status} />, sortValue: (p) => p.status },
     { id: "groups", header: "Groups", cell: (p) => (p.groups.length ? <span className="flex flex-wrap gap-1">{p.groups.map((g) => <Badge key={g}>{g}</Badge>)}</span> : "–") },
@@ -47,7 +47,7 @@ export function PeoplePage({ call }: { call: Call }) {
           )
         }
       />
-      {adding && <AddPerson call={call} groups={groups.data?.groups ?? []} onDone={(p) => (setAdding(false), reload(), p && go(`#/people/${p.id}`))} />}
+      {adding && <AddPerson call={call} groups={groups.data?.groups ?? []} onDone={(p) => (setAdding(false), reload(), p && navigate(`/people/${p.id}`))} />}
       {data?.people.length === 0 && !adding ? (
         <EmptyState title="Nobody yet" action={can("editor") && <Button onClick={() => setAdding(true)}>Add the first person</Button>}>
           Add a person, then a device for them, and send them the .ovpn file it gives you.
@@ -110,14 +110,14 @@ export function PersonPage({ call, id }: { call: Call; id: string }) {
   const change = (body: object) => action.run(() => call<Person>(`/api/v1/people/${id}`, { method: "PATCH", body: JSON.stringify(body) })).then(() => person.reload());
   const remove = () =>
     window.confirm(`Remove ${p.name}? Their devices are revoked and disconnected, and this cannot be undone.`) &&
-    void action.run(() => call(`/api/v1/people/${id}`, { method: "DELETE" })).then((ok) => ok && go("#/people"));
+    void action.run(() => call(`/api/v1/people/${id}`, { method: "DELETE" })).then((ok) => ok && navigate("/people"));
   const dirty = chosen.slice().sort().join("\n") !== p.groups.slice().sort().join("\n");
   return (
     <>
       <PageHeader
         title={p.name}
         description={p.email}
-        breadcrumbs={[{ label: "People", href: "#/people" }, { label: p.name }]}
+        breadcrumbs={[{ label: "People", href: "/people" }, { label: p.name }]}
         meta={<PersonStatus status={p.status} />}
         actions={
           <span className="flex flex-wrap gap-2">

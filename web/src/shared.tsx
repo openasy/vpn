@@ -66,8 +66,6 @@ export function useAction() {
   return { run, busy, error, clear: () => setError(undefined) };
 }
 
-export const go = (hash: string) => (window.location.hash = hash);
-
 export function ago(iso: string | null | undefined): string {
   if (!iso) return "never";
   const s = Math.round((Date.now() - Date.parse(iso)) / 1000);

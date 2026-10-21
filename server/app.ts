@@ -6,6 +6,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { AuthError, mergeOpenApi, sendProblem, type Auth, type Role } from "@openasy/auth";
 import { log } from "./log.ts";
 import { countRequest, renderMetrics } from "./metrics.ts";
+import type { ProductLink } from "./products.ts";
 import { SERVER_ID, VpnError, type ReportedSession, type Vpn } from "./vpn.ts";
 
 export interface AppOptions {
@@ -30,6 +31,8 @@ export interface AppOptions {
   docsDir?: string;
   /** The OpenAPI description, served at /api/openapi.json with this release's version. */
   openapi?: Record<string, unknown>;
+  /** The install's OpenAsy products and their addresses, from OPENASY_PRODUCTS, for the product switcher. */
+  products?: ProductLink[];
 }
 
 const TYPES: Record<string, string> = {
@@ -172,7 +175,7 @@ function parseSessions(value: unknown): ReportedSession[] {
 /** Sessions from a server that has not reported for this long are not shown: they may be gone. */
 const SESSION_FRESH_MS = 60_000;
 
-export function createApp({ db, vpn, version, auth, serverToken, adminToken, webDir, docsDir, openapi }: AppOptions) {
+export function createApp({ db, vpn, version, auth, serverToken, adminToken, webDir, docsDir, openapi, products = [] }: AppOptions) {
   // The served description includes /api/v1/auth from @openasy/auth, so the API reference documents sign-in too.
   const spec = openapi && JSON.stringify({ ...mergeOpenApi(openapi), info: { ...(openapi.info as object), version } });
   const countServers = db.prepare("SELECT COUNT(*) AS n FROM servers");
@@ -183,6 +186,7 @@ export function createApp({ db, vpn, version, auth, serverToken, adminToken, web
 
   const routes: Route[] = [
     { method: "GET", path: "/api/v1/version", auth: "none", handle: () => ({ product: "vpn", version }) },
+    { method: "GET", path: "/api/v1/products", auth: "viewer", handle: () => ({ products }) },
 
     // Servers: an admin adds one, vpn-server enrols with its token (ADR 0032), then reports here and pulls its config.
     { method: "GET", path: "/api/v1/servers", auth: "viewer", handle: () => ({ servers: vpn.listServers() }) },

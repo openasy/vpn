@@ -36,6 +36,7 @@ http://localhost:8080/api/docs/ (click *Authorize* and paste an API token).
 | `PORT` | `8080` | HTTP port |
 | `VPN_DB` | `/data/vpn.db` | SQLite file (WAL), on the `/data` volume |
 | `VPN_PUBLIC_URL` | `http://localhost:8080` | The address people open, with `https://` behind your TLS proxy. Cookies, passkeys and OIDC redirects use it |
+| `OPENASY_PRODUCTS` | | The install's other OpenAsy products, for the product switcher: `identity=https://id.example.com,infrastructure=https://infra.example.com`. Give every product the same value |
 | `VPN_SERVER_TOKEN` | | Deprecated: one token for servers set up before 0.6.0, which never enrolled. Enrol them, then remove it |
 | `VPN_SECRETS_KEY_FILE` | `/run/secrets/openasy-kek` | 32-byte key-encryption key; required. It seals the CA key, server keys and sign-in secrets in the database (ADR 0021) |
 | `VPN_PASSWORD_SIGN_IN` | `true` | `false` when everyone signs in through OIDC |
@@ -146,6 +147,7 @@ docker run --rm -e VPN_URL -e VPN_API_TOKEN ghcr.io/openasy/vpn:0.6.0 cli/openas
 | `/healthz`, `/readyz` | Liveness and readiness |
 | `/metrics` | Prometheus metrics |
 | `GET /api/v1/version` | Product and version |
+| `GET /api/v1/products` | The other OpenAsy products, from `OPENASY_PRODUCTS` |
 | `GET /api/v1/servers`, `POST /api/v1/servers` | VPN servers; add one and get its enrolment token |
 | `PATCH`, `DELETE /api/v1/servers/{id}`, `POST /api/v1/servers/{id}/enroll-token` | Change a server's address, remove it, enrol it again |
 | `POST /api/v1/servers/enroll` | Used by vpn-server once: trades the enrolment token for its secret |
