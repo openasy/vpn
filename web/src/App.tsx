@@ -1,6 +1,6 @@
 import { AppShell, BrandProvider, Button, EmptyState, PageHeader } from "@openasy/ui";
-import { AccountSettings, AuthGate, MembersSettings, TokensSettings, useAuth } from "@openasy/auth/react";
-import { Activity, KeyRound, LogOut, Network, Server as ServerIcon, UserRound, Users, UsersRound } from "lucide-react";
+import { AccountSettings, AuthGate, MembersSettings, SignInSettings, TokensSettings, useAuth } from "@openasy/auth/react";
+import { Activity, KeyRound, LogIn, LogOut, Network, Server as ServerIcon, UserRound, Users, UsersRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type Person, type Session } from "./api.ts";
 import { AccessPage } from "./access.tsx";
@@ -9,7 +9,7 @@ import { ServersPage } from "./servers.tsx";
 import { SessionsPage } from "./sessions.tsx";
 import { useApi, useData } from "./shared.tsx";
 
-const PAGES = ["people", "access", "sessions", "servers", "account", "members", "tokens"] as const;
+const PAGES = ["people", "access", "sessions", "servers", "account", "members", "signin", "tokens"] as const;
 type Page = (typeof PAGES)[number];
 type Route = { page: Page } | { page: "person"; id: string };
 
@@ -23,6 +23,7 @@ function parseRoute(hash: string): Route {
 const SETTINGS = {
   account: ["Account", "Your profile, password, two-step verification and where you are signed in."],
   members: ["Members", "Who can sign in to this VPN, and with which role. Viewers see everything; editors also add people and devices and end sessions; admins also remove people and manage groups, IP groups, members and tokens."],
+  signin: ["Sign-in", "Identity providers people can sign in with, such as OpenAsy Identity, Keycloak or Microsoft Entra ID, and which of their groups give which role."],
   tokens: ["API tokens", "For scripts and the command line tool. Each token has one role and an expiry; the secret is shown once."],
 } as const;
 
@@ -51,6 +52,7 @@ function Product() {
     ...(can("admin")
       ? [
           { id: "members", label: "Members", icon: Users },
+          { id: "signin", label: "Sign-in", icon: LogIn },
           { id: "tokens", label: "API tokens", icon: KeyRound },
         ]
       : []),
@@ -58,7 +60,7 @@ function Product() {
   ];
   const roleName = me.user.role.charAt(0).toUpperCase() + me.user.role.slice(1);
   const page = route.page;
-  const settings = page === "account" || page === "members" || page === "tokens" ? page : undefined;
+  const settings = page === "account" || page === "members" || page === "signin" || page === "tokens" ? page : undefined;
 
   return (
     <AppShell
@@ -94,7 +96,7 @@ function Product() {
               )
             }
           />
-          {settings === "account" ? <AccountSettings /> : settings === "members" ? <MembersSettings /> : <TokensSettings />}
+          {settings === "account" ? <AccountSettings /> : settings === "members" ? <MembersSettings /> : settings === "signin" ? <SignInSettings /> : <TokensSettings />}
         </>
       )}
     </AppShell>

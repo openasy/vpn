@@ -55,6 +55,9 @@ Sign-in comes from [@openasy/auth](https://github.com/openasy/auth), the same in
 - **Members**: admins invite people under Settings → Members and send them the one-time link (there is no email yet).
   These are the people who manage the VPN, not the VPN users under `/api/v1/people`.
 - **API tokens**: Settings → API tokens. One role each, an expiry within a year, shown once.
+- **Settings, Sign-in**: owners add an identity provider in the UI instead: OpenAsy Identity, Keycloak, Microsoft Entra
+  ID, Okta, Google, authentik, ZITADEL or any OpenID Connect provider. The page shows that provider's steps and the
+  redirect URI to register, checks the issuer, and maps groups to roles; the client secret is kept encrypted.
 - **OIDC**: register `vpn` with the redirect URI `<VPN_PUBLIC_URL>/api/v1/auth/oidc/sso/callback` and set
   `VPN_OIDC_ISSUER`, `VPN_OIDC_CLIENT_ID` and `VPN_OIDC_CLIENT_SECRET`. Optional: `VPN_OIDC_NAME`, `VPN_OIDC_SCOPES`,
   `VPN_OIDC_GROUPS_CLAIM`, `VPN_OIDC_ROLE_MAPPING` (`vpn-admins=admin,staff=viewer`), `VPN_OIDC_DEFAULT_ROLE` and
