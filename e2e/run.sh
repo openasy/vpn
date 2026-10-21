@@ -104,9 +104,10 @@ echo "[TCP] tcp/80: $out"
 echo "--- the UDP server goes down: the same client.ovpn connects to the next server"
 docker stop e2e-udp >/dev/null
 client client.ovpn failover || fail "the client did not move to the TCP server"
-for _ in $(seq 1 10); do [ "$(sessions)" = "e2e-tcp:Dana Kim" ] && break; sleep 1; done
-echo "[failover] session in vpn: $(sessions)"
-[ "$(sessions)" = "e2e-tcp:Dana Kim" ] || fail "the session was not listed on the TCP server"
+# The stopped server's last report stays listed until it is 60 seconds old; the new session must be there too.
+for _ in $(seq 1 10); do [[ ",$(sessions)," == *",e2e-tcp:Dana Kim,"* ]] && break; sleep 1; done
+echo "[failover] sessions in vpn: $(sessions)"
+[[ ",$(sessions)," == *",e2e-tcp:Dana Kim,"* ]] || fail "the session was not listed on the TCP server"
 docker start e2e-udp >/dev/null
 for _ in $(seq 1 30); do [ "$(api localhost:18090/api/v1/servers | jsonq 'd.servers.find(s=>s.id==="e2e-udp").status')" = online ] && break; sleep 1; done
 
