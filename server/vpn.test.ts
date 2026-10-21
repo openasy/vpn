@@ -241,6 +241,21 @@ describe("client configs", () => {
     expect(ovpn.match(/^remote .*$/gm)).toEqual(["remote vpn.example.com 1194 udp", "remote vpn.example.com 443 tcp-client"]);
     await a.close();
   });
+
+  it("list each server at its own address, and leave out servers that never reported", async () => {
+    const a = await startApp({ version: "1.2.3", publicHost: undefined });
+    const servers = [["ist-1", "ist.vpn.example.com", "tcp/443"], ["fra-1", "fra.vpn.example.com", "udp/1194"], ["ist-2", "ist.vpn.example.com", "udp/1194"], ["new-1", "new.vpn.example.com", null]] as const;
+    for (const [id, address, listen] of servers) {
+      const { enrollToken } = (await (await a.admin("/api/v1/servers", { method: "POST", body: JSON.stringify({ id, address }) })).json()) as { enrollToken: string };
+      if (!listen) continue;
+      const { secret } = (await (await fetch(`${a.base}/api/v1/servers/enroll`, { method: "POST", body: JSON.stringify({ token: enrollToken }) })).json()) as { secret: string };
+      await fetch(`${a.base}/api/v1/servers/heartbeat`, { method: "POST", headers: { authorization: `Bearer ${secret}` }, body: JSON.stringify({ id, version: "1.2.3", listen, openvpnRunning: true }) });
+    }
+    const person = (await (await a.admin("/api/v1/people", { method: "POST", body: JSON.stringify({ name: "C", email: "c@example.com" }) })).json()) as { id: string };
+    const { ovpn } = (await (await a.admin(`/api/v1/people/${person.id}/devices`, { method: "POST", body: JSON.stringify({ name: "Laptop" }) })).json()) as { ovpn: string };
+    expect(ovpn.match(/^remote .*$/gm)).toEqual(["remote fra.vpn.example.com 1194 udp", "remote ist.vpn.example.com 1194 udp", "remote ist.vpn.example.com 443 tcp-client"]);
+    await a.close();
+  });
 });
 
 describe("sessions", () => {

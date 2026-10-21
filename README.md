@@ -14,14 +14,18 @@ identity provider (OIDC). Each person has a role in this VPN; scripts use API to
 ## Run
 
 ```bash
-export VPN_SERVER_TOKEN=$(openssl rand -hex 32)
 export VPN_PUBLIC_HOST=vpn.example.com   # the name or IP clients connect to
 openssl rand -hex 32 > openasy-kek
-docker compose up -d
+docker compose up -d vpn
 docker compose logs vpn | grep 'no owner yet'
 ```
 
-Open the link from the log once to create the owner account; there is no default password (ADR 0013).
+Open the link from the log once to create the owner account; there is no default password (ADR 0013). Then add the
+two servers under **Servers**, `edge-1` and `edge-1-tcp`, and start them with their one-time tokens:
+
+```bash
+EDGE_1_TOKEN=ove_... EDGE_1_TCP_TOKEN=ove_... docker compose up -d
+```
 
 [`compose.yaml`](./compose.yaml) starts `ghcr.io/openasy/vpn` and two `ghcr.io/openasy/vpn-server` servers, one on
 UDP 1194 and one on TCP 443. The UI and API are on http://localhost:8080; the API reference with *Try it out* is at
@@ -32,12 +36,12 @@ http://localhost:8080/api/docs/ (click *Authorize* and paste an API token).
 | `PORT` | `8080` | HTTP port |
 | `VPN_DB` | `/data/vpn.db` | SQLite file (WAL), on the `/data` volume |
 | `VPN_PUBLIC_URL` | `http://localhost:8080` | The address people open, with `https://` behind your TLS proxy. Cookies, passkeys and OIDC redirects use it |
-| `VPN_SERVER_TOKEN` | | Token the vpn-server servers send; they are refused without it |
+| `VPN_SERVER_TOKEN` | | Deprecated: one token for servers set up before 0.6.0, which never enrolled. Enrol them, then remove it |
 | `VPN_SECRETS_KEY_FILE` | `/run/secrets/openasy-kek` | 32-byte key-encryption key; required. It seals the CA key, server keys and sign-in secrets in the database (ADR 0021) |
 | `VPN_PASSWORD_SIGN_IN` | `true` | `false` when everyone signs in through OIDC |
 | `VPN_OIDC_*` | | Sign-in through your identity provider, see [Sign-in](#sign-in) |
 | `VPN_ADMIN_TOKEN` | | Deprecated: one shared admin token without an expiry, for scripts from before sign-in. Use an API token |
-| `VPN_PUBLIC_HOST` | | Host name or IP clients connect to; needed to add devices |
+| `VPN_PUBLIC_HOST` | | Host name or IP clients connect to, for servers added without an address of their own |
 | `VPN_NETWORK` | `10.8.0.0/24` | Address pool for clients; each device gets a fixed address from it |
 | `VPN_HEADLESS` | `false` | `true` serves only the API |
 
@@ -85,6 +89,9 @@ download may be refused once.
 
 How it works:
 
+- An admin adds each server under Servers, with the address clients connect to, and gets a one-time enrolment token.
+  vpn-server trades it for its own secret (ADR 0032); a secret speaks for its server only.
+
 - `vpn` holds the CA and issues one certificate and one fixed VPN address per device.
 - Each vpn-server pulls the config for its server from `GET /api/v1/servers/{id}/config` (with `ETag`, so an unchanged
   config costs a 304), writes it for OpenVPN and restarts OpenVPN only when certificates or the server settings change.
@@ -96,7 +103,17 @@ How it works:
 - Servers report live sessions every heartbeat: `GET /api/v1/sessions`. A device that is revoked, suspended or deleted
   is disconnected at the next heartbeat. `DELETE /api/v1/sessions/{server}/{device}` ends one session; the device may
   reconnect if it is still allowed.
-- A client config lists the servers `vpn` knows when the file is created, so start the servers before adding devices.
+- A client config lists every server that has reported, each at its address, UDP first. The client tries them in turn,
+  so when a server or a location is down it connects to the next. Every server carries every device, with the same
+  VPN address; each server NATs its clients, so the networks behind it see the server's address.
+- The list is fixed when the file is created: start the servers before adding devices. A server added later reaches
+  only devices added after it. Give locations DNS names, so that moving a server needs no new client configs.
+
+### Several locations
+
+Run vpn-server on a host at each location and add it under Servers with that host's address; the page shows the
+command to start it. The hosts need to reach `vpn` over HTTPS and the networks their clients use. `vpn` never connects
+to them (ADR 0023).
 
 ## Command line
 
@@ -126,7 +143,9 @@ docker run --rm -e VPN_URL -e VPN_API_TOKEN ghcr.io/openasy/vpn:0.5.0 cli/openas
 | `/healthz`, `/readyz` | Liveness and readiness |
 | `/metrics` | Prometheus metrics |
 | `GET /api/v1/version` | Product and version |
-| `GET /api/v1/servers` | Known VPN servers |
+| `GET /api/v1/servers`, `POST /api/v1/servers` | VPN servers; add one and get its enrolment token |
+| `PATCH`, `DELETE /api/v1/servers/{id}`, `POST /api/v1/servers/{id}/enroll-token` | Change a server's address, remove it, enrol it again |
+| `POST /api/v1/servers/enroll` | Used by vpn-server once: trades the enrolment token for its secret |
 | `POST /api/v1/servers/heartbeat` | Used by vpn-server |
 | `GET /api/v1/servers/{id}/config` | Used by vpn-server: what its OpenVPN must run |
 | `/api/v1/people`, `/api/v1/people/{id}/devices`, `/api/v1/devices/{id}` | People and their devices |
@@ -141,6 +160,16 @@ operation and fails if a response does not match it. Errors are RFC 9457 Problem
 https://openasy.github.io/products/vpn/api
 
 ## Upgrade
+
+### To 0.6.0
+
+- Servers are added under Servers and enrol with their own token (ADR 0032). Servers that report with
+  `VPN_SERVER_TOKEN` keep working and are shown as *Legacy*. To move one, click *Enrol*, start it with
+  `VPN_ENROLL_TOKEN` and its state directory on a volume (`compose.yaml` adds `vpn-server-data`), then remove
+  `VPN_SERVER_TOKEN` once no server is legacy. `VPN_SERVER_TOKEN` is removed in 0.7.0.
+- An enrolled server cannot be reached with `VPN_SERVER_TOKEN`, and a server's secret fetches only its own config.
+- `GET /api/v1/servers` adds `address`, `status`, `legacy` and `createdAt`; `version` and `lastSeen` are null for a
+  server that has not reported yet.
 
 ### To 0.5.0
 

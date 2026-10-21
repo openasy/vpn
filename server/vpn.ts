@@ -1,14 +1,16 @@
 // The VPN's data: people, groups, IP groups, devices and what each vpn-server must run.
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { clientAddresses, formatCidr, formatIp, parseCidr, parseIp, parsePorts, type Cidr } from "./net.ts";
 import type { Keyring } from "./kek.ts";
 import { crl, createCa, issue, tlsCryptKey, type Ca } from "./pki.ts";
 
+type VpnErrorCode = "invalid-body" | "not-found" | "conflict" | "invalid-token";
+
 export class VpnError extends Error {
   readonly status: number;
-  readonly code: "invalid-body" | "not-found" | "conflict";
-  constructor(status: number, code: "invalid-body" | "not-found" | "conflict", message: string) {
+  readonly code: VpnErrorCode;
+  constructor(status: number, code: VpnErrorCode, message: string) {
     super(message);
     this.status = status;
     this.code = code;
@@ -19,6 +21,14 @@ const invalid = (m: string) => new VpnError(422, "invalid-body", m);
 const notFound = (what: string) => new VpnError(404, "not-found", `${what} does not exist.`);
 const now = () => new Date().toISOString();
 const CRL_REFRESH = 7 * 864e5;
+const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
+/** An enrolment token works this long, once. */
+const ENROLL_TTL_MS = 7 * 864e5;
+/** A server that has not reported for this long is offline; it reports every 15 seconds. */
+export const SERVER_OFFLINE_MS = 60_000;
+export const SERVER_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
+/** A host name or IPv4 address clients connect to. */
+const ADDRESS = /^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$/;
 
 export interface Person {
   id: string;
@@ -92,6 +102,44 @@ export interface Session {
   connectedAt: string;
 }
 
+export interface Server {
+  id: string;
+  /** Host name or IP clients connect to; null uses VPN_PUBLIC_HOST. */
+  address: string | null;
+  status: "waiting-to-enrol" | "online" | "offline" | "version-mismatch";
+  /** Reports with VPN_SERVER_TOKEN instead of its own secret; enrol it again to move it off. */
+  legacy: boolean;
+  version: string | null;
+  /** "udp/1194", "tcp/443"; null when the server's config file decides or it has not reported. */
+  listen: string | null;
+  openvpnRunning: boolean;
+  configVersion: string | null;
+  lastSeen: string | null;
+  createdAt: string;
+}
+
+export interface ServerReport {
+  version: string;
+  listen: string | null;
+  openvpnRunning: boolean;
+  configVersion: string | null;
+}
+
+type ServerRow = {
+  id: string;
+  address: string | null;
+  legacy: number;
+  enroll_token_hash: string | null;
+  enroll_expires_at: string | null;
+  secret_hash: string | null;
+  version: string | null;
+  listen: string | null;
+  openvpn_running: number;
+  config_version: string | null;
+  last_seen: string | null;
+  created_at: string;
+};
+
 export interface ReportedSession {
   cn: string;
   realAddress: string;
@@ -104,8 +152,10 @@ export interface ReportedSession {
 export interface VpnOptions {
   /** Address pool for clients, for example 10.8.0.0/24. */
   network: string;
-  /** Host name or IP clients connect to; required to download a client config. */
+  /** Host name or IP clients connect to, for servers that have no address of their own. */
   publicHost?: string;
+  /** This release; a server of another version is shown as such (ADR 0019). */
+  version?: string;
   /** Seals the CA key, the tls-crypt key and server keys in the database (ADR 0021). */
   keyring: Keyring;
 }
@@ -340,7 +390,7 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
   async function createDevice(personId: string, body: { name?: unknown }): Promise<{ device: Device; ovpn: string }> {
     const p = person(personId);
     if (p.status !== "active") throw new VpnError(409, "conflict", `${p.name} is suspended; activate them before adding a device.`);
-    if (!opts.publicHost) throw new VpnError(409, "conflict", "Set VPN_PUBLIC_HOST to the address clients connect to before adding devices.");
+    if (!remotes().length) throw new VpnError(409, "conflict", "No server has an address clients can connect to. Give a server its address under Servers, or set VPN_PUBLIC_HOST, before adding devices.");
     const name = typeof body.name === "string" ? body.name.trim() : "";
     if (!name || name.length > 100) throw invalid("name is required, at most 100 characters, for example \"Work laptop\".");
     const id = randomUUID();
@@ -364,13 +414,22 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
 
   // ---- what servers run ---------------------------------------------------
 
-  function remotes(): Array<{ proto: "udp" | "tcp"; port: number }> {
-    const listens = (db.prepare("SELECT DISTINCT listen FROM servers").all() as Array<{ listen: string | null }>).map((r) => r.listen ?? "udp/1194");
-    const unique = [...new Set(listens.length ? listens : ["udp/1194"])].sort((a, b) => (a.startsWith("udp") ? -1 : 1) - (b.startsWith("udp") ? -1 : 1));
-    return unique.map((l) => {
-      const [proto, port] = l.split("/");
-      return { proto: proto as "udp" | "tcp", port: Number(port) };
-    });
+  /**
+   * Where clients connect: one line per server, at its own address or VPN_PUBLIC_HOST. UDP first, then TCP for
+   * networks that block UDP; servers by id within each. A server that has never reported is left out: its port is
+   * not known yet.
+   */
+  function remotes(): Array<{ host: string; proto: "udp" | "tcp"; port: number }> {
+    const rows = db.prepare("SELECT id, address, listen FROM servers WHERE last_seen IS NOT NULL ORDER BY id").all() as Array<{ id: string; address: string | null; listen: string | null }>;
+    const found = new Map<string, { host: string; proto: "udp" | "tcp"; port: number }>();
+    for (const r of rows.length ? rows : [{ id: "", address: null, listen: null }]) {
+      const host = r.address ?? opts.publicHost;
+      if (!host) continue;
+      const [proto, port] = (r.listen ?? "udp/1194").split("/");
+      const remote = { host, proto: proto as "udp" | "tcp", port: Number(port) };
+      found.set(`${host} ${port} ${proto}`, remote);
+    }
+    return [...found.values()].sort((a, b) => (a.proto === b.proto ? 0 : a.proto === "udp" ? -1 : 1));
   }
 
   function clientConfig(personName: string, deviceName: string, cert: string, key: string): string {
@@ -380,8 +439,8 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
       "client",
       "dev tun",
       "nobind",
-      // UDP first; clients fall back to the next remote, for example TCP 443 on networks that block UDP.
-      ...remotes().map((r) => `remote ${opts.publicHost} ${r.port} ${r.proto === "tcp" ? "tcp-client" : "udp"}`),
+      // Clients try each remote in turn: another server when one is down, TCP 443 on networks that block UDP.
+      ...remotes().map((r) => `remote ${r.host} ${r.port} ${r.proto === "tcp" ? "tcp-client" : "udp"}`),
       "remote-cert-tls server",
       "persist-key",
       "persist-tun",
@@ -458,6 +517,146 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
     return { version, ...body };
   }
 
+  // ---- servers ------------------------------------------------------------
+
+  const serverRow = (id: string) => db.prepare("SELECT * FROM servers WHERE id = ?").get(id) as ServerRow | undefined;
+  const requireServer = (id: string) => {
+    const s = serverRow(id);
+    if (!s) throw notFound("Server");
+    return s;
+  };
+
+  function toServer(s: ServerRow): Server {
+    const online = !!s.last_seen && Date.now() - Date.parse(s.last_seen) <= SERVER_OFFLINE_MS;
+    const status: Server["status"] =
+      !s.secret_hash && !s.legacy ? "waiting-to-enrol" : !online ? "offline" : opts.version && s.version !== opts.version ? "version-mismatch" : "online";
+    return {
+      id: s.id,
+      address: s.address,
+      status,
+      legacy: s.legacy === 1,
+      version: s.version,
+      listen: s.listen,
+      openvpnRunning: s.openvpn_running === 1,
+      configVersion: s.config_version,
+      lastSeen: s.last_seen,
+      createdAt: s.created_at,
+    };
+  }
+
+  const listServers = (): Server[] => (db.prepare("SELECT * FROM servers ORDER BY id").all() as ServerRow[]).map(toServer);
+  const server = (id: string): Server => toServer(requireServer(id));
+
+  function address(value: unknown): string | null {
+    if (value === null || value === "") return null;
+    const a = typeof value === "string" ? value.trim().toLowerCase() : "";
+    if (!ADDRESS.test(a)) throw invalid("address must be a host name such as fra.vpn.example.com or an IPv4 address.");
+    return a;
+  }
+
+  function newEnrollToken(id: string) {
+    const token = `ove_${randomBytes(24).toString("base64url")}`;
+    const expires = new Date(Date.now() + ENROLL_TTL_MS).toISOString();
+    db.prepare("UPDATE servers SET enroll_token_hash = ?, enroll_expires_at = ? WHERE id = ?").run(sha256(token), expires, id);
+    return { enrollToken: token, enrollExpiresAt: expires };
+  }
+
+  /** Revokes a server's certificate and forgets it; the server gets a new one when it next pulls its config. */
+  function dropServerCert(id: string) {
+    const cert = db.prepare("SELECT serial FROM server_certs WHERE server_id = ?").get(id) as { serial: string } | undefined;
+    if (!cert) return;
+    db.prepare("INSERT OR IGNORE INTO revocations (serial, revoked_at) VALUES (?, ?)").run(cert.serial, now());
+    db.prepare("DELETE FROM server_certs WHERE server_id = ?").run(id);
+  }
+
+  /** A new server and its one-time enrolment token, shown once. */
+  function createServer(body: { id?: unknown; address?: unknown }) {
+    const id = typeof body.id === "string" ? body.id.trim() : "";
+    if (!SERVER_ID.test(id)) throw invalid("id is lowercase letters, digits and dashes, up to 63, for example fra-1.");
+    const addr = address(body.address ?? null);
+    if (serverRow(id)) throw new VpnError(409, "conflict", `A server named ${id} exists.`);
+    db.prepare("INSERT INTO servers (id, address, created_at) VALUES (?, ?, ?)").run(id, addr, now());
+    // A certificate left by an earlier server of this name is not handed to the new one.
+    dropServerCert(id);
+    const token = newEnrollToken(id);
+    return { server: server(id), ...token };
+  }
+
+  function updateServer(id: string, body: { address?: unknown }): Server {
+    requireServer(id);
+    if (body.address !== undefined) db.prepare("UPDATE servers SET address = ? WHERE id = ?").run(address(body.address), id);
+    return server(id);
+  }
+
+  /**
+   * A new enrolment token, for a server that lost its volume or still uses VPN_SERVER_TOKEN. Its old secret stops
+   * working, and it gets a new certificate.
+   */
+  function reEnrollServer(id: string) {
+    requireServer(id);
+    db.exec("BEGIN");
+    try {
+      db.prepare("UPDATE servers SET secret_hash = NULL, legacy = 0 WHERE id = ?").run(id);
+      dropServerCert(id);
+      const token = newEnrollToken(id);
+      db.exec("COMMIT");
+      return { server: server(id), ...token };
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  function deleteServer(id: string) {
+    requireServer(id);
+    db.exec("BEGIN");
+    try {
+      dropServerCert(id);
+      db.prepare("DELETE FROM sessions WHERE server_id = ?").run(id);
+      db.prepare("DELETE FROM pending_disconnects WHERE server_id = ?").run(id);
+      db.prepare("DELETE FROM servers WHERE id = ?").run(id);
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  /** Trades a one-time enrolment token for the server's own secret. Only its hash is kept. */
+  function enrollServer(body: { token?: unknown }) {
+    const token = typeof body.token === "string" ? body.token : "";
+    const s = token ? (db.prepare("SELECT * FROM servers WHERE enroll_token_hash = ?").get(sha256(token)) as ServerRow | undefined) : undefined;
+    if (!s || !s.enroll_expires_at || s.enroll_expires_at <= now()) {
+      throw new VpnError(401, "invalid-token", "The enrolment token is unknown, used or expired. Create a new one under Servers.");
+    }
+    const secret = `ovs_${randomBytes(32).toString("base64url")}`;
+    db.prepare("UPDATE servers SET enroll_token_hash = NULL, enroll_expires_at = NULL, secret_hash = ?, legacy = 0 WHERE id = ?").run(sha256(secret), s.id);
+    return { serverId: s.id, secret };
+  }
+
+  /** The server a secret belongs to, if any. */
+  const serverBySecret = (secret: string) => (db.prepare("SELECT id FROM servers WHERE secret_hash = ?").get(sha256(secret)) as { id: string } | undefined)?.id;
+
+  /** VPN_SERVER_TOKEN may speak for a server only while it is legacy, or new: enrolled servers use their own secret. */
+  function legacyAllowed(id: string): boolean {
+    const s = serverRow(id);
+    return !s || s.legacy === 1;
+  }
+
+  /** Records a heartbeat. A legacy server reporting for the first time is added. */
+  function recordHeartbeat(id: string, r: ServerReport, legacy: boolean) {
+    const at = now();
+    if (legacy) db.prepare("INSERT OR IGNORE INTO servers (id, legacy, created_at) VALUES (?, 1, ?)").run(id, at);
+    db.prepare("UPDATE servers SET version = ?, listen = ?, openvpn_running = ?, config_version = ?, last_seen = ? WHERE id = ?").run(
+      r.version,
+      r.listen,
+      r.openvpnRunning ? 1 : 0,
+      r.configVersion,
+      at,
+      id,
+    );
+  }
+
   // ---- sessions -----------------------------------------------------------
 
   /** Replaces what a server reported as connected. */
@@ -513,6 +712,16 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
 
   return {
     init,
+    listServers,
+    server,
+    createServer,
+    updateServer,
+    reEnrollServer,
+    deleteServer,
+    enrollServer,
+    serverBySecret,
+    legacyAllowed,
+    recordHeartbeat,
     recordSessions,
     listSessions,
     requestDisconnect,

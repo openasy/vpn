@@ -66,6 +66,27 @@ const MIGRATIONS = [
      PRIMARY KEY (server_id, cn)
    );
    CREATE TABLE pending_disconnects (server_id TEXT NOT NULL, cn TEXT NOT NULL, PRIMARY KEY (server_id, cn))`,
+  // 0.6.0: servers are added by an admin and enrol with a one-time token (ADR 0032). A server added but not yet
+  // enrolled has not reported, so what it reports becomes nullable. Rows from before are legacy: they keep using
+  // VPN_SERVER_TOKEN until an admin enrols them.
+  `CREATE TABLE servers_new (
+     id TEXT PRIMARY KEY,
+     address TEXT,
+     legacy INTEGER NOT NULL DEFAULT 0,
+     enroll_token_hash TEXT UNIQUE,
+     enroll_expires_at TEXT,
+     secret_hash TEXT UNIQUE,
+     version TEXT,
+     listen TEXT,
+     openvpn_running INTEGER NOT NULL DEFAULT 0,
+     config_version TEXT,
+     last_seen TEXT,
+     created_at TEXT NOT NULL
+   );
+   INSERT INTO servers_new (id, legacy, version, listen, openvpn_running, config_version, last_seen, created_at)
+     SELECT id, 1, version, listen, openvpn_running, config_version, last_seen, last_seen FROM servers;
+   DROP TABLE servers;
+   ALTER TABLE servers_new RENAME TO servers`,
 ];
 
 /** Opens the product's single SQLite file in WAL mode (ADR 0011) and migrates it forward. */

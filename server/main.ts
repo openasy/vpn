@@ -78,7 +78,7 @@ if (caKey && !caKey.value.startsWith("v1.") && !opensSignInSecrets(kek)) {
   log("error", "this key-encryption key does not open the sign-in secrets the earlier version sealed: mount the same openasy-kek as before. Nothing was changed", { file: secretsKeyFile });
   process.exit(1);
 }
-const vpn = createVpn(db, { network: process.env.VPN_NETWORK ?? "10.8.0.0/24", publicHost: process.env.VPN_PUBLIC_HOST, keyring: createKeyring(kek) });
+const vpn = createVpn(db, { network: process.env.VPN_NETWORK ?? "10.8.0.0/24", publicHost: process.env.VPN_PUBLIC_HOST, version, keyring: createKeyring(kek) });
 try {
   const { sealed } = await vpn.init();
   if (sealed) log("info", "sealed keys stored in the clear by an earlier version", { sealed });
@@ -116,9 +116,8 @@ const server = createServer(
 );
 
 server.listen(port, () => log("info", "vpn started", { version, port, db: dbPath, headless }));
-if (!process.env.VPN_SERVER_TOKEN) log("warn", "VPN_SERVER_TOKEN is not set; vpn-server agents will be refused");
+if (process.env.VPN_SERVER_TOKEN) log("warn", "VPN_SERVER_TOKEN is deprecated: add each server under Servers and start it with its own VPN_ENROLL_TOKEN, then remove VPN_SERVER_TOKEN");
 if (process.env.VPN_ADMIN_TOKEN) log("warn", "VPN_ADMIN_TOKEN is deprecated: it is one shared admin token without an expiry. Create API tokens under Settings and remove it");
-if (!process.env.VPN_PUBLIC_HOST) log("warn", "VPN_PUBLIC_HOST is not set; devices cannot be added until it names the address clients connect to");
 if (!publicUrl.startsWith("https://") && !/^http:\/\/(localhost|127\.0\.0\.1)(:|$)/.test(publicUrl)) {
   log("warn", "VPN_PUBLIC_URL is not https: browsers will not keep secure cookies or allow passkeys. Put vpn behind TLS (ADR 0026)", { url: publicUrl });
 }

@@ -6,13 +6,16 @@ import type { DatabaseSync } from "node:sqlite";
 import { AuthError, mergeOpenApi, sendProblem, type Auth, type Role } from "@openasy/auth";
 import { log } from "./log.ts";
 import { countRequest, renderMetrics } from "./metrics.ts";
-import { VpnError, type ReportedSession, type Vpn } from "./vpn.ts";
+import { SERVER_ID, VpnError, type ReportedSession, type Vpn } from "./vpn.ts";
 
 export interface AppOptions {
   db: DatabaseSync;
   vpn: Vpn;
   version: string;
-  /** Shared token the vpn-server servers send; their requests are refused when unset. */
+  /**
+   * Deprecated: one token shared by every vpn-server, for servers set up before enrolment (ADR 0032). It speaks only
+   * for legacy servers; an enrolled server uses its own secret.
+   */
   serverToken?: string;
   /** Sign-in, sessions, members and API tokens (ADR 0002, 0003). */
   auth: Auth;
@@ -27,16 +30,6 @@ export interface AppOptions {
   docsDir?: string;
   /** The OpenAPI description, served at /api/openapi.json with this release's version. */
   openapi?: Record<string, unknown>;
-}
-
-interface Server {
-  id: string;
-  version: string;
-  /** "udp/1194", "tcp/443"; null when the server's config file decides. */
-  listen: string | null;
-  openvpnRunning: boolean;
-  configVersion: string | null;
-  lastSeen: string;
 }
 
 const TYPES: Record<string, string> = {
@@ -64,7 +57,7 @@ function send(res: ServerResponse, status: number, body: string | Buffer, type =
 
 const json = (res: ServerResponse, status: number, data: unknown, headers?: Record<string, string>) => send(res, status, JSON.stringify(data), "application/json", headers);
 
-type ProblemCode = "invalid-token" | "invalid-json" | "invalid-body" | "version-mismatch" | "not-found" | "conflict" | "not-configured" | "internal-error";
+type ProblemCode = "invalid-token" | "invalid-json" | "invalid-body" | "version-mismatch" | "not-found" | "conflict" | "not-configured" | "forbidden" | "internal-error";
 
 const TITLES: Record<ProblemCode, string> = {
   "invalid-token": "Invalid token",
@@ -74,6 +67,7 @@ const TITLES: Record<ProblemCode, string> = {
   "not-found": "Not found",
   conflict: "Conflict",
   "not-configured": "Not configured",
+  forbidden: "Forbidden",
   "internal-error": "Internal error",
 };
 
@@ -137,6 +131,8 @@ interface Ctx {
   res: ServerResponse;
   params: string[];
   body: () => Promise<Record<string, unknown>>;
+  /** On "server" routes: the enrolled server that sent the request, or null for VPN_SERVER_TOKEN. */
+  server: string | null;
 }
 interface Route {
   method: string;
@@ -179,15 +175,7 @@ const SESSION_FRESH_MS = 60_000;
 export function createApp({ db, vpn, version, auth, serverToken, adminToken, webDir, docsDir, openapi }: AppOptions) {
   // The served description includes /api/v1/auth from @openasy/auth, so the API reference documents sign-in too.
   const spec = openapi && JSON.stringify({ ...mergeOpenApi(openapi), info: { ...(openapi.info as object), version } });
-  const listServers = db.prepare("SELECT id, version, listen, openvpn_running, config_version, last_seen FROM servers ORDER BY id");
   const countServers = db.prepare("SELECT COUNT(*) AS n FROM servers");
-  const upsertServer = db.prepare(
-    `INSERT INTO servers (id, version, listen, openvpn_running, config_version, last_seen) VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT (id) DO UPDATE SET version = excluded.version, listen = excluded.listen, openvpn_running = excluded.openvpn_running,
-       config_version = excluded.config_version, last_seen = excluded.last_seen`,
-  );
-
-  const SERVER_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
   const created = (res: ServerResponse, data: unknown) => (json(res, 201, data), undefined);
   const noContent = (res: ServerResponse) => {
     res.writeHead(204, SECURITY_HEADERS).end();
@@ -196,25 +184,21 @@ export function createApp({ db, vpn, version, auth, serverToken, adminToken, web
   const routes: Route[] = [
     { method: "GET", path: "/api/v1/version", auth: "none", handle: () => ({ product: "vpn", version }) },
 
-    // Servers: vpn-server reports here and pulls its config.
-    {
-      method: "GET",
-      path: "/api/v1/servers",
-      auth: "viewer",
-      handle: () => {
-        const rows = listServers.all() as Array<{ id: string; version: string; listen: string | null; openvpn_running: number; config_version: string | null; last_seen: string }>;
-        const servers: Server[] = rows.map((r) => ({ id: r.id, version: r.version, listen: r.listen, openvpnRunning: r.openvpn_running === 1, configVersion: r.config_version, lastSeen: r.last_seen }));
-        return { servers };
-      },
-    },
+    // Servers: an admin adds one, vpn-server enrols with its token (ADR 0032), then reports here and pulls its config.
+    { method: "GET", path: "/api/v1/servers", auth: "viewer", handle: () => ({ servers: vpn.listServers() }) },
+    { method: "POST", path: "/api/v1/servers", auth: "admin", handle: async ({ res, body }) => created(res, vpn.createServer(await body())) },
+    { method: "PATCH", path: "/api/v1/servers/:id", auth: "admin", handle: async ({ params, body }) => vpn.updateServer(params[0]!, await body()) },
+    { method: "DELETE", path: "/api/v1/servers/:id", auth: "admin", handle: ({ res, params }) => (vpn.deleteServer(params[0]!), noContent(res)) },
+    { method: "POST", path: "/api/v1/servers/:id/enroll-token", auth: "admin", handle: ({ params }) => vpn.reEnrollServer(params[0]!) },
+    { method: "POST", path: "/api/v1/servers/enroll", auth: "none", handle: async ({ body }) => vpn.enrollServer(await body()) },
     {
       method: "POST",
       path: "/api/v1/servers/heartbeat",
       auth: "server",
       bodyLimit: 1024 * 1024,
-      handle: async ({ res, body }) => {
+      handle: async ({ res, body, server }) => {
         const raw = await body();
-        const { id, version: agentVersion, listen, openvpnRunning, configVersion } = raw as Partial<Server>;
+        const { id, version: agentVersion, listen, openvpnRunning, configVersion } = raw as { id?: unknown; version?: unknown; listen?: unknown; openvpnRunning?: unknown; configVersion?: unknown };
         if (
           typeof id !== "string" ||
           !SERVER_ID.test(id) ||
@@ -225,10 +209,15 @@ export function createApp({ db, vpn, version, auth, serverToken, adminToken, web
         ) {
           throw new HttpProblem(422, "invalid-body", "Expected { id, version, listen?, openvpnRunning, configVersion? }.");
         }
-        // ADR 0019: vpn-server always has the same version as vpn.
-        if (agentVersion !== version) throw new HttpProblem(409, "version-mismatch", `vpn-server ${agentVersion} does not match vpn ${version}; install vpn-server ${version}`);
+        checkServer(server, id);
+        const report = { version: agentVersion, listen: (listen as string | null | undefined) ?? null, openvpnRunning, configVersion: (configVersion as string | null | undefined) ?? null };
+        // ADR 0019: vpn-server always has the same version as vpn. The server is recorded, so Servers shows why.
+        if (agentVersion !== version) {
+          vpn.recordHeartbeat(id, report, server === null);
+          throw new HttpProblem(409, "version-mismatch", `vpn-server ${agentVersion} does not match vpn ${version}; install vpn-server ${version}`);
+        }
         const sessions = parseSessions(raw.sessions);
-        upsertServer.run(id, agentVersion, listen ?? null, openvpnRunning ? 1 : 0, configVersion ?? null, new Date().toISOString());
+        vpn.recordHeartbeat(id, report, server === null);
         vpn.recordSessions(id, sessions);
         // Sessions to end now; vpn-server also ends any session whose device is no longer in its config.
         json(res, 202, { status: "accepted", disconnect: vpn.pendingDisconnects(id) });
@@ -239,9 +228,10 @@ export function createApp({ db, vpn, version, auth, serverToken, adminToken, web
       method: "GET",
       path: "/api/v1/servers/:id/config",
       auth: "server",
-      handle: async ({ req, res, params }) => {
+      handle: async ({ req, res, params, server }) => {
         const id = params[0]!;
         if (!SERVER_ID.test(id)) throw new HttpProblem(422, "invalid-body", "Server ids are lowercase letters, digits and dashes.");
+        checkServer(server, id);
         const config = await vpn.serverConfig(id);
         const etag = `"${config.version}"`;
         if (req.headers["if-none-match"] === etag) {
@@ -287,15 +277,30 @@ export function createApp({ db, vpn, version, auth, serverToken, adminToken, web
 
   const compiled = routes.map((r) => ({ ...r, re: new RegExp(`^${r.path.replace(/:[a-z]+/g, "([^/]+)")}$`) }));
 
-  function authorize(req: IncomingMessage, access: Access) {
-    if (access === "none") return;
+  let warnedLegacy = false;
+  /** Who is asking: on "server" routes the enrolled server's id, or null for VPN_SERVER_TOKEN. */
+  function authorize(req: IncomingMessage, access: Access): string | null {
+    if (access === "none") return null;
     if (access === "server") {
-      if (!serverToken) throw new HttpProblem(503, "not-configured", "Set VPN_SERVER_TOKEN on vpn to use this endpoint.");
-      if (!tokenMatches(req.headers.authorization, serverToken)) throw new HttpProblem(401, "invalid-token", "Send VPN_SERVER_TOKEN as a bearer token.");
-      return;
+      const header = req.headers.authorization;
+      const id = header?.startsWith("Bearer ovs_") ? vpn.serverBySecret(header.slice(7)) : undefined;
+      if (id) return id;
+      if (tokenMatches(header, serverToken)) {
+        if (!warnedLegacy) log("warn", "a vpn-server uses VPN_SERVER_TOKEN, which is deprecated: enrol it under Servers");
+        warnedLegacy = true;
+        return null;
+      }
+      throw new HttpProblem(401, "invalid-token", "Unknown server secret. Enrol this server again under Servers, and start vpn-server with VPN_ENROLL_TOKEN.");
     }
-    if (tokenMatches(req.headers.authorization, adminToken)) return;
+    if (tokenMatches(req.headers.authorization, adminToken)) return null;
     auth.authorize(req, access);
+    return null;
+  }
+
+  /** A server speaks only for itself; VPN_SERVER_TOKEN only for servers that never enrolled. */
+  function checkServer(server: string | null, id: string) {
+    if (server === null ? vpn.legacyAllowed(id) : server === id) return;
+    throw new HttpProblem(403, "forbidden", server === null ? `${id} has enrolled: it must use its own secret, not VPN_SERVER_TOKEN.` : `This secret belongs to ${server}, not ${id}.`);
   }
 
   async function route(req: IncomingMessage, res: ServerResponse): Promise<string> {
@@ -338,9 +343,9 @@ export function createApp({ db, vpn, version, auth, serverToken, adminToken, web
       const m = path.match(r.re);
       if (!m || r.method !== req.method) continue;
       try {
-        authorize(req, r.auth);
+        const server = authorize(req, r.auth);
         const params = m.slice(1).map(decodeURIComponent);
-        const result = await r.handle({ req, res, params, body: () => readJson(req, r.bodyLimit) });
+        const result = await r.handle({ req, res, params, server, body: () => readJson(req, r.bodyLimit) });
         if (!res.headersSent && result !== undefined) json(res, 200, result);
       } catch (err) {
         if (err instanceof AuthError) sendProblem(res, err);

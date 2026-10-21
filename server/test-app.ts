@@ -14,7 +14,7 @@ export const KEK = Buffer.alloc(32, 7);
 
 export async function startApp(opts: Partial<AppOptions> & { version: string; publicHost?: string }) {
   const db = openDb(":memory:");
-  const vpn = createVpn(db, { network: "10.8.0.0/24", publicHost: "publicHost" in opts ? opts.publicHost : "vpn.example.com", keyring: createKeyring(KEK) });
+  const vpn = createVpn(db, { network: "10.8.0.0/24", publicHost: "publicHost" in opts ? opts.publicHost : "vpn.example.com", version: opts.version, keyring: createKeyring(KEK) });
   await vpn.init();
   // The origin is known once the port is, so the handler is set after listening.
   let handler: RequestListener = (_req, res) => res.writeHead(503).end();

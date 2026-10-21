@@ -112,6 +112,30 @@ describe("responses match openapi.json", () => {
     await call("GET", "/api/v1/servers/{id}/config", {}, "/api/v1/servers/edge-1/config");
   });
 
+  it("adding and enrolling servers", async () => {
+    const added = (await call("POST", "/api/v1/servers", admin({ id: "fra-1", address: "fra.vpn.example.com" }))).body as { enrollToken: string };
+    await call("POST", "/api/v1/servers", admin({ id: "fra-1" }));
+    await call("POST", "/api/v1/servers", admin({ id: "Bad Id" }));
+    await call("POST", "/api/v1/servers", { ...admin(), body: "nope" });
+    await call("POST", "/api/v1/servers", {});
+    await call("PATCH", "/api/v1/servers/{id}", admin({ address: null }), "/api/v1/servers/fra-1");
+    await call("PATCH", "/api/v1/servers/{id}", admin({ address: "no way" }), "/api/v1/servers/fra-1");
+    await call("PATCH", "/api/v1/servers/{id}", admin({}), "/api/v1/servers/missing");
+
+    await call("POST", "/api/v1/servers/enroll", json({ token: "ove_wrong" }));
+    await call("POST", "/api/v1/servers/enroll", { ...json({}), body: "nope" });
+    const { secret } = (await call("POST", "/api/v1/servers/enroll", json({ token: added.enrollToken }))).body as { secret: string };
+    await call("POST", "/api/v1/servers/heartbeat", json({ id: "fra-1", version, listen: "udp/1194", openvpnRunning: true }, secret));
+    await call("POST", "/api/v1/servers/heartbeat", json({ id: "edge-1", version, openvpnRunning: true }, secret));
+    await call("GET", "/api/v1/servers/{id}/config", json(undefined, secret), "/api/v1/servers/edge-1/config");
+    await call("GET", "/api/v1/servers", admin());
+
+    await call("POST", "/api/v1/servers/{id}/enroll-token", admin(), "/api/v1/servers/fra-1/enroll-token");
+    await call("POST", "/api/v1/servers/{id}/enroll-token", admin(), "/api/v1/servers/missing/enroll-token");
+    await call("DELETE", "/api/v1/servers/{id}", admin(), "/api/v1/servers/fra-1");
+    await call("DELETE", "/api/v1/servers/{id}", admin(), "/api/v1/servers/fra-1");
+  });
+
   it("people, devices, groups and IP groups", async () => {
     const group = (await call("POST", "/api/v1/groups", { method: "POST", ...admin({ name: "SRE on-call" }) })).body as { id: string };
     await call("POST", "/api/v1/groups", admin({ name: "SRE on-call" }));

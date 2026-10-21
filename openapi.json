@@ -4,7 +4,7 @@
     "title": "OpenAsy VPN API",
     "version": "0.5.0",
     "summary": "Servers, users and access for OpenVPN.",
-    "description": "Every screen of vpn uses this API, and so can your scripts (ADR 0014). Within `/api/v1` changes are additive only; anything removed is deprecated first (ADR 0024). Errors use Problem Details (RFC 9457).\n\nvpn-server takes `VPN_SERVER_TOKEN`. Everything else takes the session of a signed-in person or an API token, and each operation names the role it needs (`x-openasy-role`: viewer, editor, admin; ADR 0003).\n\nSign-in, members and API tokens are under `/api/v1/auth`, provided by [@openasy/auth](https://github.com/openasy/auth#routes).",
+    "description": "Every screen of vpn uses this API, and so can your scripts (ADR 0014). Within `/api/v1` changes are additive only; anything removed is deprecated first (ADR 0024). Errors use Problem Details (RFC 9457).\n\nvpn-server enrols once with a one-time token from `POST /api/v1/servers`, then sends its own secret (ADR 0032); `VPN_SERVER_TOKEN` still works for servers that never enrolled, and is deprecated. Everything else takes the session of a signed-in person or an API token, and each operation names the role it needs (`x-openasy-role`: viewer, editor, admin; ADR 0003).\n\nSign-in, members and API tokens are under `/api/v1/auth`, provided by [@openasy/auth](https://github.com/openasy/auth#routes).",
     "license": {
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
@@ -1054,7 +1054,7 @@
           "Servers"
         ],
         "summary": "List VPN servers",
-        "description": "Every vpn-server that has reported here, with its last heartbeat.\n\nNeeds the viewer role.",
+        "description": "Every server added here or reporting with `VPN_SERVER_TOKEN`, with its state.\n\nNeeds the viewer role.",
         "responses": {
           "200": {
             "description": "Known servers, ordered by id.",
@@ -1088,6 +1088,283 @@
           }
         ],
         "x-openasy-role": "viewer"
+      },
+      "post": {
+        "operationId": "createServer",
+        "tags": [
+          "Servers"
+        ],
+        "summary": "Add a server",
+        "description": "Returns a one-time enrolment token for vpn-server. Once it reports, client configs made from then on list it at its address.\n\nNeeds the admin role.",
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiToken": []
+          },
+          {
+            "adminToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewServer"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Added, waiting to enrol.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerEnrollToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "409": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "x-openasy-role": "admin"
+      }
+    },
+    "/api/v1/servers/{id}": {
+      "patch": {
+        "operationId": "updateServer",
+        "tags": [
+          "Servers"
+        ],
+        "summary": "Change a server's address",
+        "description": "Needs the admin role.",
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiToken": []
+          },
+          {
+            "adminToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Server id, for example fra-1.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerChange"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Server"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "422": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "x-openasy-role": "admin"
+      },
+      "delete": {
+        "operationId": "deleteServer",
+        "tags": [
+          "Servers"
+        ],
+        "summary": "Remove a server",
+        "description": "Its secret stops working and its certificate is revoked. Client configs that list it keep trying it, then the next server.\n\nNeeds the admin role.",
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiToken": []
+          },
+          {
+            "adminToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Server id, for example fra-1.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed."
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "x-openasy-role": "admin"
+      }
+    },
+    "/api/v1/servers/{id}/enroll-token": {
+      "post": {
+        "operationId": "createServerEnrollToken",
+        "tags": [
+          "Servers"
+        ],
+        "summary": "Enrol a server again",
+        "description": "For a server that lost its volume, or one still on `VPN_SERVER_TOKEN`. Its secret and the shared token stop working for it, and it gets a new certificate once it enrols.\n\nNeeds the admin role.",
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiToken": []
+          },
+          {
+            "adminToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Server id, for example fra-1.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A new enrolment token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerEnrollToken"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "404": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "x-openasy-role": "admin"
+      }
+    },
+    "/api/v1/servers/enroll": {
+      "post": {
+        "operationId": "enrollServer",
+        "tags": [
+          "Servers"
+        ],
+        "summary": "Enrol a server",
+        "description": "Called once by vpn-server with its enrolment token. The answer is the server's own secret; send it as the bearer token from then on.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Enrollment"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Enrolled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Enrolled"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          }
+        }
       }
     },
     "/api/v1/servers/heartbeat": {
@@ -1099,6 +1376,9 @@
         "summary": "Report a server's state",
         "description": "Called by vpn-server every 15 seconds with its live sessions. The answer lists sessions to end now. vpn-server must have the same version as vpn (ADR 0019).",
         "security": [
+          {
+            "serverSecret": []
+          },
           {
             "serverToken": []
           }
@@ -1130,13 +1410,13 @@
           "401": {
             "$ref": "#/components/responses/Problem"
           },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
           "409": {
             "$ref": "#/components/responses/Problem"
           },
           "422": {
-            "$ref": "#/components/responses/Problem"
-          },
-          "503": {
             "$ref": "#/components/responses/Problem"
           }
         }
@@ -1151,6 +1431,9 @@
         "summary": "What a server must run",
         "description": "Pulled by vpn-server. Issues the server's certificate on first use. Send the last `ETag` in `If-None-Match` to get 304 when nothing changed. Contains the server's private key.",
         "security": [
+          {
+            "serverSecret": []
+          },
           {
             "serverToken": []
           }
@@ -1191,10 +1474,10 @@
           "401": {
             "$ref": "#/components/responses/Problem"
           },
-          "422": {
+          "403": {
             "$ref": "#/components/responses/Problem"
           },
-          "503": {
+          "422": {
             "$ref": "#/components/responses/Problem"
           }
         }
@@ -1308,10 +1591,16 @@
         "scheme": "bearer",
         "description": "An API token created under Settings → API tokens (`oa_vpn_...`): one role, always an expiry (ADR 0003)."
       },
+      "serverSecret": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A server's own secret (`ovs_...`), from `POST /api/v1/servers/enroll`. It speaks for that server only."
+      },
       "serverToken": {
         "type": "http",
         "scheme": "bearer",
-        "description": "`VPN_SERVER_TOKEN`, shared with vpn-server."
+        "description": "Deprecated: `VPN_SERVER_TOKEN`, shared by every vpn-server. It speaks only for legacy servers, which never enrolled; enrol each server and use its secret instead.",
+        "x-deprecated": true
       },
       "adminToken": {
         "type": "http",
@@ -1356,21 +1645,53 @@
         "type": "object",
         "required": [
           "id",
+          "address",
+          "status",
+          "legacy",
           "version",
           "listen",
           "openvpnRunning",
+          "configVersion",
           "lastSeen",
-          "configVersion"
+          "createdAt"
         ],
         "properties": {
           "id": {
             "$ref": "#/components/schemas/ServerId"
           },
-          "version": {
-            "type": "string",
+          "address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Host name or IP clients connect to; null uses `VPN_PUBLIC_HOST`.",
             "examples": [
-              "0.1.0"
+              "fra.vpn.example.com"
             ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "waiting-to-enrol",
+              "online",
+              "offline",
+              "version-mismatch"
+            ],
+            "description": "`offline` when it has not reported for 60 seconds."
+          },
+          "legacy": {
+            "type": "boolean",
+            "description": "Reports with the deprecated `VPN_SERVER_TOKEN`. Get it an enrolment token to move it to its own secret."
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "0.6.0"
+            ],
+            "description": "null until it reports."
           },
           "listen": {
             "$ref": "#/components/schemas/Listen"
@@ -1379,8 +1700,12 @@
             "type": "boolean"
           },
           "lastSeen": {
-            "type": "string",
-            "format": "date-time"
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Last heartbeat; null until it reports."
           },
           "configVersion": {
             "type": [
@@ -1388,6 +1713,10 @@
               "null"
             ],
             "description": "Version of the config vpn-server applies; compare with GET /api/v1/servers/{id}/config."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -2233,6 +2562,94 @@
               "maximum": 65535
             },
             "description": "Empty: every port."
+          }
+        }
+      },
+      "NewServer": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/ServerId"
+          },
+          "address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Host name or IPv4 address clients connect to. Leave it out to use `VPN_PUBLIC_HOST`.",
+            "examples": [
+              "fra.vpn.example.com"
+            ]
+          }
+        }
+      },
+      "ServerChange": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Host name or IPv4 address clients connect to; null uses `VPN_PUBLIC_HOST`. Client configs made before the change keep the old address."
+          }
+        }
+      },
+      "ServerEnrollToken": {
+        "type": "object",
+        "required": [
+          "server",
+          "enrollToken",
+          "enrollExpiresAt"
+        ],
+        "properties": {
+          "server": {
+            "$ref": "#/components/schemas/Server"
+          },
+          "enrollToken": {
+            "type": "string",
+            "description": "Start vpn-server with it as `VPN_ENROLL_TOKEN`. Works once, for 7 days; it is not shown again.",
+            "examples": [
+              "ove_..."
+            ]
+          },
+          "enrollExpiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Enrollment": {
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "The enrolment token from adding the server."
+          }
+        }
+      },
+      "Enrolled": {
+        "type": "object",
+        "required": [
+          "serverId",
+          "secret"
+        ],
+        "properties": {
+          "serverId": {
+            "$ref": "#/components/schemas/ServerId"
+          },
+          "secret": {
+            "type": "string",
+            "description": "The server's own bearer secret. vpn keeps only its hash.",
+            "examples": [
+              "ovs_..."
+            ]
           }
         }
       }

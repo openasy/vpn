@@ -90,10 +90,22 @@ describe("openasy-vpn", () => {
       app.agent("/api/v1/servers/heartbeat", { method: "POST", body: JSON.stringify({ id: "edge-1", version: "1.2.3", listen: "udp/1194", openvpnRunning: true, sessions }) });
     const live = [{ cn: d.id, realAddress: "203.0.113.7:51820", vpnIp: d.vpnIp, bytesIn: 2048, bytesOut: 10, connectedAt: new Date().toISOString() }];
     await heartbeat(live);
-    expect((await cli(["servers"])).out).toMatch(/edge-1\s+udp\/1194\s+1\.2\.3\s+running/);
+    expect((await cli(["servers"])).out).toMatch(/edge-1 \(legacy\)\s+online\s+default\s+udp\/1194\s+1\.2\.3\s+running/);
     expect((await cli(["sessions"])).out).toMatch(/Dana Kim\s+Work laptop\s+\S+\s+edge-1\s+10\.8\.0\.\d+\s+203\.0\.113\.7:51820/);
     expect((await cli(["sessions", "end", "edge-1", d.id])).code).toBe(0);
     expect(((await (await heartbeat(live)).json()) as { disconnect: string[] }).disconnect).toEqual([d.id]);
+  });
+
+  it("adds a server, prints its token once, and removes it", async () => {
+    const added = await cli(["servers", "add", "FRA-1", "--address", "fra.vpn.example.com"]);
+    expect(added.code).toBe(0);
+    expect(added.out).toMatch(/Added the server fra-1\. Start vpn-server on fra\.vpn\.example\.com .*\n\n {2}VPN_ENROLL_TOKEN=ove_\S+\n/);
+    expect((await cli(["servers"])).out).toMatch(/fra-1\s+waiting-to-enrol\s+fra\.vpn\.example\.com\s+-\s+-\s+stopped\s+not applied\s+never/);
+    expect((await cli(["servers", "address", "fra-1"])).out).toContain("fra-1 is at VPN_PUBLIC_HOST");
+    expect((await cli(["servers", "enroll", "fra-1"])).out).toContain("VPN_ENROLL_TOKEN=ove_");
+    expect((await cli(["servers", "add", "fra-1"])).err).toContain("A server named fra-1 exists");
+    expect((await cli(["servers", "remove", "fra-1"])).out).toContain("Removed the server fra-1");
+    expect((await cli(["servers", "remove", "fra-1"])).err).toContain("Server does not exist");
   });
 
   it("removes what it added", async () => {

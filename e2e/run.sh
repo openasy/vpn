@@ -18,15 +18,23 @@ docker run -d --name e2e-target --network e2e-int --ip 172.30.20.10 vpn-server:d
   h.createServer((q, s) => s.end('hello from the internal network')).listen(80);
   h.createServer((q, s) => s.end('port 8081 should be blocked')).listen(8081);" >/dev/null
 openssl rand -hex 32 > "$D/kek"
-docker run -d --name e2e-vpn --network e2e-pub -p 18090:8080 -v "$D/kek:/run/secrets/openasy-kek:ro" -e VPN_SERVER_TOKEN=server-e2e -e VPN_ADMIN_TOKEN=admin-e2e -e VPN_PUBLIC_HOST=vpn.test vpn:dev >/dev/null
-agent() { # name proto port alias
+docker run -d --name e2e-vpn --network e2e-pub -p 18090:8080 -v "$D/kek:/run/secrets/openasy-kek:ro" -e VPN_ADMIN_TOKEN=admin-e2e vpn:dev >/dev/null
+# Each server is added with its own address, as at two locations, and enrols with its own one-time token (ADR 0032).
+agent() { # name proto port address
+  local token
+  token=$(api -X POST localhost:18090/api/v1/servers -d "{\"id\":\"$1\",\"address\":\"$4\"}" | jsonq d.enrollToken)
+  [ -n "$token" ] || fail "$1 was not added"
   docker run -d --name "$1" --network e2e-pub --network-alias "$4" --cap-add NET_ADMIN --device /dev/net/tun --sysctl net.ipv4.ip_forward=1 \
-    -e VPN_URL=http://e2e-vpn:8080 -e VPN_SERVER_TOKEN=server-e2e -e VPN_SERVER_ID="$1" -e OPENVPN_PROTO="$2" -e OPENVPN_PORT="$3" -e HEARTBEAT_SECONDS=2 vpn-server:dev >/dev/null
+    -e VPN_URL=http://e2e-vpn:8080 -e VPN_ENROLL_TOKEN="$token" -e OPENVPN_PROTO="$2" -e OPENVPN_PORT="$3" -e HEARTBEAT_SECONDS=2 vpn-server:dev >/dev/null
   docker network connect e2e-int "$1"
 }
 for _ in $(seq 1 30); do curl -sf localhost:18090/readyz >/dev/null && break; sleep 0.5; done
 agent e2e-udp udp 1194 vpn.test
 agent e2e-tcp tcp 443 vpn-tcp.test
+# Client configs list the servers that have reported, so wait for both before issuing the device.
+for _ in $(seq 1 30); do
+  [ "$(api localhost:18090/api/v1/servers | jsonq 'd.servers.filter(s=>s.status==="online").length')" = 2 ] && break; sleep 1
+done
 
 api -X POST localhost:18090/api/v1/groups -d '{"name":"Backend engineers"}' >/dev/null
 api -X POST localhost:18090/api/v1/ip-groups -d '{"name":"Internal","networks":[{"cidr":"172.30.20.0/24","ports":"tcp/80"}],"allowedGroups":["Backend engineers"]}' >/dev/null
@@ -39,9 +47,12 @@ DEVICE=$(cli devices dana@example.com --json | jsonq 'd.devices[0].id')
 cli people | grep -q "Dana Kim" || fail "the command line tool does not list Dana Kim"
 grep -v '^remote ' "$D/client.ovpn" | sed "s#^nobind#nobind\nremote vpn-tcp.test 443 tcp-client#" > "$D/client-tcp.ovpn"
 echo "remotes in client.ovpn: $(grep '^remote ' "$D/client.ovpn" | tr '\n' ';')"
+[ "$(grep '^remote ' "$D/client.ovpn" | tr '\n' ';')" = "remote vpn.test 1194 udp;remote vpn-tcp.test 443 tcp-client;" ] || fail "client.ovpn does not list each server at its address"
 
-# Wait until both agents applied the latest config, the one that contains the device.
-latest() { curl -s -H "Authorization: Bearer server-e2e" "localhost:18090/api/v1/servers/$1/config" | jsonq d.version; }
+# Wait until both agents applied the latest config, the one that contains the device. Each asks with its own secret.
+secret() { docker exec "$1" node -pe "JSON.parse(require('fs').readFileSync('/var/lib/openasy-vpn/server.json')).secret"; }
+latest() { curl -s -H "Authorization: Bearer $(secret "$1")" "localhost:18090/api/v1/servers/$1/config" | jsonq d.version; }
+[ "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $(secret e2e-tcp)" localhost:18090/api/v1/servers/e2e-udp/config)" = 403 ] || fail "one server's secret fetched another server's config"
 for _ in $(seq 1 30); do
   want="$(latest e2e-udp) $(latest e2e-tcp)"
   have=$(api localhost:18090/api/v1/servers | jsonq '["e2e-udp","e2e-tcp"].map(i=>d.servers.find(x=>x.id===i)?.configVersion).join(" ")')
@@ -89,6 +100,15 @@ client client-tcp.ovpn TCP || fail "TCP client did not connect"
 out=$(get http://172.30.20.10)
 echo "[TCP] tcp/80: $out"
 [ "$out" = "hello from the internal network" ] || fail "TCP client could not reach the internal network"
+
+echo "--- the UDP server goes down: the same client.ovpn connects to the next server"
+docker stop e2e-udp >/dev/null
+client client.ovpn failover || fail "the client did not move to the TCP server"
+for _ in $(seq 1 10); do [ "$(sessions)" = "e2e-tcp:Dana Kim" ] && break; sleep 1; done
+echo "[failover] session in vpn: $(sessions)"
+[ "$(sessions)" = "e2e-tcp:Dana Kim" ] || fail "the session was not listed on the TCP server"
+docker start e2e-udp >/dev/null
+for _ in $(seq 1 30); do [ "$(api localhost:18090/api/v1/servers | jsonq 'd.servers.find(s=>s.id==="e2e-udp").status')" = online ] && break; sleep 1; done
 
 echo "--- revoke the device while it is connected"
 client client.ovpn UDP || fail "UDP client did not connect again"

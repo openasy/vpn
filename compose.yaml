@@ -1,11 +1,17 @@
 # VPN: vpn (API and web UI) plus vpn-server, which runs OpenVPN, on the same host.
 # Each vpn-server listens on one protocol and port; run one per port you need.
 #
-#   export VPN_SERVER_TOKEN=$(openssl rand -hex 32)
 #   export VPN_PUBLIC_HOST=vpn.example.com   # the name or IP clients connect to
 #   openssl rand -hex 32 > openasy-kek       # encrypts the CA key and sign-in secrets (ADR 0021)
-#   docker compose up -d
+#   docker compose up -d vpn
 #   docker compose logs vpn | grep 'no owner yet'   # the one-time link that creates the owner account
+#
+# Then add the servers under Servers, edge-1 and edge-1-tcp, and start each with its one-time token (ADR 0032):
+#
+#   EDGE_1_TOKEN=ove_... EDGE_1_TCP_TOKEN=ove_... docker compose up -d
+#
+# Servers at other locations run vpn-server on their own host: add each under Servers with its address, and run
+# the command shown there. Client configs list every server, so clients move to the next one when one is down.
 #
 # Keep openasy-kek apart from the volume, and with your backups: without it the CA cannot be opened.
 services:
@@ -21,8 +27,10 @@ services:
     environment:
       # The address people open vpn at; with a TLS proxy in front, its https:// URL.
       VPN_PUBLIC_URL: ${VPN_PUBLIC_URL:-http://localhost:8080}
-      VPN_SERVER_TOKEN: ${VPN_SERVER_TOKEN:?set VPN_SERVER_TOKEN}
+      # The address of servers added without one of their own.
       VPN_PUBLIC_HOST: ${VPN_PUBLIC_HOST:?set VPN_PUBLIC_HOST}
+      # Deprecated: the token servers set up before 0.6.0 share. Enrol them under Servers, then remove it.
+      VPN_SERVER_TOKEN: ${VPN_SERVER_TOKEN:-}
       VPN_NETWORK: 10.8.0.0/24
 
   vpn-server:
@@ -36,9 +44,13 @@ services:
       net.ipv4.ip_forward: 1   # lets clients reach the networks behind this host
     ports:
       - "1194:1194/udp"
+    volumes:
+      - vpn-server-data:/var/lib/openasy-vpn   # its secret: without it, the server must be enrolled again
     environment:
       VPN_URL: http://vpn:8080
-      VPN_SERVER_TOKEN: ${VPN_SERVER_TOKEN:?set VPN_SERVER_TOKEN}
+      VPN_ENROLL_TOKEN: ${EDGE_1_TOKEN:-}
+      # Until it is enrolled, a server set up before 0.6.0 keeps working with these.
+      VPN_SERVER_TOKEN: ${VPN_SERVER_TOKEN:-}
       VPN_SERVER_ID: edge-1
       OPENVPN_PROTO: udp
       OPENVPN_PORT: "1194"
@@ -58,9 +70,12 @@ services:
       net.ipv4.ip_forward: 1
     ports:
       - "443:443/tcp"
+    volumes:
+      - vpn-server-tcp-data:/var/lib/openasy-vpn
     environment:
       VPN_URL: http://vpn:8080
-      VPN_SERVER_TOKEN: ${VPN_SERVER_TOKEN:?set VPN_SERVER_TOKEN}
+      VPN_ENROLL_TOKEN: ${EDGE_1_TCP_TOKEN:-}
+      VPN_SERVER_TOKEN: ${VPN_SERVER_TOKEN:-}
       VPN_SERVER_ID: edge-1-tcp
       OPENVPN_PROTO: tcp
       OPENVPN_PORT: "443"
@@ -69,6 +84,8 @@ services:
 
 volumes:
   vpn-data:
+  vpn-server-data:
+  vpn-server-tcp-data:
 
 secrets:
   openasy-kek:

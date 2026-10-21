@@ -1,5 +1,6 @@
-import { Callout, DataTable, EmptyState, type Column } from "@openasy/ui";
+import { Button, Callout, DataTable, EmptyState, type Column } from "@openasy/ui";
 import { useAuth } from "@openasy/auth/react";
+import { Copy } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { api, MfaSetupRequired, Unauthorized } from "./api.ts";
 
@@ -109,4 +110,20 @@ export function Problem({ error, title = "That did not work" }: { error?: string
 
 export function List<T>({ label, rows, columns, empty, getRowId, onRowClick }: { label: string; rows: T[] | undefined; columns: Column<T>[]; empty: string; getRowId: (r: T) => string; onRowClick?: (r: T) => void }) {
   return <DataTable label={label} columns={columns} rows={rows ?? []} loading={!rows} getRowId={getRowId} pageSize={50} density="compact" onRowClick={onRowClick} empty={<EmptyState title={empty} />} />;
+}
+
+/** Commands to copy onto a host. */
+export function Code({ children, label }: { children: string; label: string }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <pre tabIndex={0} aria-label={label} className="vpn-code">
+        {children}
+      </pre>
+      <div>
+        <Button size="xs" icon={<Copy />} onClick={() => void navigator.clipboard?.writeText(children)}>
+          Copy
+        </Button>
+      </div>
+    </div>
+  );
 }

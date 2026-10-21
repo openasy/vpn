@@ -33,7 +33,12 @@ Usage: openasy-vpn <command> [arguments] [--json]
   sessions                                  Devices connected now
   sessions end <server> <device id>         End a session; the device may connect again if allowed
 
-  servers                                   vpn-server instances and their last heartbeat
+  servers                                   vpn-server instances and their state
+  servers add <name> [--address <host>]     Add a server and print its one-time enrolment token. The address is
+                                            what clients connect to; without one, VPN_PUBLIC_HOST
+  servers address <server> [<host>]         Change its address; none uses VPN_PUBLIC_HOST
+  servers enroll <server>                   A new enrolment token; its secret stops working
+  servers remove <server>                   Remove a server; its sessions end
 
 Environment:
   VPN_URL        Address of vpn, default http://localhost:8080
@@ -92,11 +97,19 @@ interface Session {
 }
 interface Server {
   id: string;
-  version: string;
+  address: string | null;
+  status: string;
+  legacy: boolean;
+  version: string | null;
   listen: string | null;
   openvpnRunning: boolean;
   configVersion: string | null;
-  lastSeen: string;
+  lastSeen: string | null;
+}
+interface NewServer {
+  server: Server;
+  enrollToken: string;
+  enrollExpiresAt: string;
 }
 
 /** Splits arguments into positional ones and flags; repeated flags collect into a list. */
@@ -307,9 +320,39 @@ export async function run(argv: string[], io: Io): Promise<number> {
       }
 
       case "servers": {
-        const r = await api<{ servers: Server[] }>("GET", "/api/v1/servers");
-        const rows = r.servers.map((s) => [s.id, s.listen ?? "udp/1194", s.version, s.openvpnRunning ? "running" : "stopped", s.configVersion ?? "not applied", s.lastSeen.slice(0, 19).replace("T", " ")]);
-        print(r, table(["SERVER", "LISTENS ON", "VERSION", "OPENVPN", "CONFIG", "LAST HEARTBEAT (UTC)"], rows) || "No servers yet.\n");
+        const enrolText = (n: NewServer) =>
+          `Start vpn-server on ${n.server.address ?? "its host"} with VPN_URL=${base} and this one-time token, before ${n.enrollExpiresAt.slice(0, 16).replace("T", " ")} UTC:\n\n  VPN_ENROLL_TOKEN=${n.enrollToken}\n\nKeep its /var/lib/openasy-vpn on a volume: the server's secret is there.\n`;
+        const id = (ref: string) => encodeURIComponent(ref.toLowerCase());
+        if (!sub) {
+          const r = await api<{ servers: Server[] }>("GET", "/api/v1/servers");
+          const rows = r.servers.map((s) => [
+            s.id + (s.legacy ? " (legacy)" : ""),
+            s.status,
+            s.address ?? "default",
+            s.listen ?? (s.lastSeen ? "udp/1194" : "-"),
+            s.version ?? "-",
+            s.openvpnRunning ? "running" : "stopped",
+            s.configVersion ?? "not applied",
+            s.lastSeen?.slice(0, 19).replace("T", " ") ?? "never",
+          ]);
+          print(r, table(["SERVER", "STATE", "ADDRESS", "LISTENS ON", "VERSION", "OPENVPN", "CONFIG", "LAST HEARTBEAT (UTC)"], rows) || "No servers yet.\n");
+        } else if (sub === "add") {
+          need(3, "servers add <name> [--address <host>]");
+          const n = await api<NewServer>("POST", "/api/v1/servers", { id: args[2]!.toLowerCase(), address: one("address") ?? null });
+          print(n, `Added the server ${n.server.id}. ${enrolText(n)}`);
+        } else if (sub === "address") {
+          need(3, "servers address <server> [<host>]");
+          const s = await api<Server>("PATCH", `/api/v1/servers/${id(args[2]!)}`, { address: args[3] ?? null });
+          print(s, `${s.id} is at ${s.address ?? "VPN_PUBLIC_HOST"}. Client configs made from now on use it; earlier ones keep the old address.\n`);
+        } else if (sub === "enroll") {
+          need(3, "servers enroll <server>");
+          const n = await api<NewServer>("POST", `/api/v1/servers/${id(args[2]!)}/enroll-token`);
+          print(n, `${n.server.id}'s secret no longer works. ${enrolText(n)}`);
+        } else if (sub === "remove") {
+          need(3, "servers remove <server>");
+          await api("DELETE", `/api/v1/servers/${id(args[2]!)}`);
+          print({ removed: args[2]!.toLowerCase() }, `Removed the server ${args[2]!.toLowerCase()}. Client configs that list it skip to the next server.\n`);
+        } else throw new CliError(`Unknown command "servers ${sub}". Run openasy-vpn help.`);
         return 0;
       }
 
