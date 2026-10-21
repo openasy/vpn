@@ -123,14 +123,14 @@ image without installing anything:
 
 ```bash
 export VPN_URL=https://vpn.example.com VPN_API_TOKEN=oa_vpn_...
-curl -LO https://github.com/openasy/vpn/releases/download/v0.5.0/openasy-vpn.ts
+curl -LO https://github.com/openasy/vpn/releases/download/v0.6.0/openasy-vpn.ts
 node openasy-vpn.ts help
 node openasy-vpn.ts sessions
 
 # Next to vpn, with compose.yaml: nothing to install, and VPN_URL is not needed
 docker compose exec -T -e VPN_API_TOKEN vpn /nodejs/bin/node cli/openasy-vpn.ts people
 # Anywhere with Docker
-docker run --rm -e VPN_URL -e VPN_API_TOKEN ghcr.io/openasy/vpn:0.5.0 cli/openasy-vpn.ts people
+docker run --rm -e VPN_URL -e VPN_API_TOKEN ghcr.io/openasy/vpn:0.6.0 cli/openasy-vpn.ts people
 ```
 
 `devices add` never overwrites a file; `--out -` prints the `.ovpn` instead, for example to pass it on in a pipe.
@@ -203,10 +203,10 @@ docker run --rm -v <project>_vpn-manager-data:/from -v <project>_vpn-data:/to al
 Images are signed with cosign (keyless), carry an SPDX SBOM attestation and SLSA level 3 provenance.
 
 ```bash
-cosign verify ghcr.io/openasy/vpn:0.5.0 \
+cosign verify ghcr.io/openasy/vpn:0.6.0 \
   --certificate-identity-regexp '^https://github.com/openasy/vpn/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-cosign verify-attestation --type spdxjson ghcr.io/openasy/vpn:0.5.0 \
+cosign verify-attestation --type spdxjson ghcr.io/openasy/vpn:0.6.0 \
   --certificate-identity-regexp '^https://github.com/openasy/vpn/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 slsa-verifier verify-image ghcr.io/openasy/vpn@sha256:<digest> --source-uri github.com/openasy/vpn
