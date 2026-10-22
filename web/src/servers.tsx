@@ -1,6 +1,6 @@
-import { Badge, Button, Callout, EmptyState, KpiCard, KpiGrid, PageHeader, Panel, StatusBadge, TextField, type Column } from "@openasy/ui";
+import { Badge, Button, Callout, Dialog, EmptyState, KpiCard, KpiGrid, PageHeader, Panel, StatusBadge, TextField, type Column } from "@openasy/ui";
 import { useAuth } from "@openasy/auth/react";
-import { Pencil, Plus, RotateCw, Trash2 } from "lucide-react";
+import { Check, Pencil, Plus, RotateCw, Trash2 } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import type { NewServer, Server } from "./api.ts";
 import { ago, Code, List, Problem, useAction, useData, type Call } from "./shared.tsx";
@@ -19,17 +19,22 @@ function EnrollCommand({ added, version, onDone }: { added: NewServer; version?:
   const here = window.location.origin;
   const { id } = added.server;
   return (
-    <Callout
-      tone="warning"
+    <Dialog
+      open
+      onOpenChange={(open) => !open && onDone()}
+      size="lg"
+      icon={<Check aria-hidden className="size-4" />}
+      iconTone="success"
       title={`Start ${id} with this one-time token`}
-      action={
-        <Button size="sm" onClick={onDone}>
+      description={`It works once, until ${new Date(added.enrollExpiresAt).toLocaleString()}, and is not shown again.`}
+      footer={
+        <Button variant="primary" onClick={onDone}>
           Done
         </Button>
       }
     >
       <span className="flex flex-col gap-2">
-        <span>It works once, until {new Date(added.enrollExpiresAt).toLocaleString()}, and is not shown again. On the host clients connect to{added.server.address ? ` (${added.server.address})` : ""}:</span>
+        <span>On the host clients connect to{added.server.address ? ` (${added.server.address})` : ""}:</span>
         <Code label={`Start ${id}`}>
           {`docker run -d --name vpn-server --restart unless-stopped \\
   --cap-add NET_ADMIN --device /dev/net/tun --sysctl net.ipv4.ip_forward=1 \\
@@ -43,7 +48,10 @@ function EnrollCommand({ added, version, onDone }: { added: NewServer; version?:
         </span>
         <span>Client configs list a server once it has reported. Devices added before that do not know it; they keep using the servers they have.</span>
       </span>
-    </Callout>
+      <Callout tone="warning" title="Closing this dialog hides the token">
+        If it is lost, enrol the server again from its row.
+      </Callout>
+    </Dialog>
   );
 }
 
@@ -55,14 +63,16 @@ export function ServersPage({ call, version }: { call: Call; version?: string })
   const [id, setId] = useState("");
   const [address, setAddress] = useState("");
   const [added, setAdded] = useState<NewServer>();
+  const [adding, setAdding] = useState(false);
   const action = useAction();
+  const close = () => (setAdding(false), setId(""), setAddress(""), action.clear());
 
   const add = async (e: FormEvent) => {
     e.preventDefault();
     await action.run(async () => {
-      setAdded(await call<NewServer>("/api/v1/servers", { method: "POST", body: JSON.stringify({ id, address: address || null }) }));
-      setId("");
-      setAddress("");
+      const r = await call<NewServer>("/api/v1/servers", { method: "POST", body: JSON.stringify({ id, address: address || null }) });
+      close();
+      setAdded(r);
       reload();
     });
   };
@@ -130,26 +140,43 @@ export function ServersPage({ call, version }: { call: Call; version?: string })
       <PageHeader
         title="Servers"
         description={`vpn-server runs OpenVPN on the hosts clients connect to, here or at other locations. Each pulls its config from here and reports every 15 seconds; client configs list every server, so clients move to the next one when one is down. It must have the same version as this VPN${version ? ` (${version})` : ""}.`}
+        actions={
+          can("admin") && (
+            <Button variant="primary" icon={<Plus />} onClick={() => setAdding(true)}>
+              Add server
+            </Button>
+          )
+        }
       />
       <KpiGrid>
         <KpiCard label="Servers" value={servers?.length ?? "–"} />
         <KpiCard label="Running" value={servers ? up : "–"} tone={servers && up < servers.length ? "warning" : "success"} />
       </KpiGrid>
-      {can("admin") && (
-        <Panel title="Add a server" description="Its address is the host name or IP clients connect to; leave it empty to use VPN_PUBLIC_HOST.">
-          <form onSubmit={add} className="flex flex-wrap items-end gap-2">
-            <TextField label="Name" value={id} onChange={(e) => setId(e.target.value.toLowerCase())} placeholder="fra-1" />
-            <TextField label="Address" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="fra.vpn.example.com" />
-            <Button type="submit" variant="primary" icon={<Plus />} loading={action.busy} disabled={!id}>
+      <Dialog
+        open={adding}
+        onOpenChange={(open) => !open && close()}
+        title="Add a server"
+        description="Its address is the host name or IP clients connect to; leave it empty to use VPN_PUBLIC_HOST."
+        onSubmit={add}
+        footer={
+          <>
+            <Button type="button" onClick={close}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" loading={action.busy} disabled={!id}>
               Add server
             </Button>
-          </form>
-        </Panel>
-      )}
-      <Problem error={action.error} />
+          </>
+        }
+      >
+        <Problem error={action.error} title="Not added" />
+        <TextField label="Name" value={id} onChange={(e) => setId(e.target.value.toLowerCase())} placeholder="fra-1" />
+        <TextField label="Address" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="fra.vpn.example.com" />
+      </Dialog>
+      {!adding && <Problem error={action.error} />}
       {added && <EnrollCommand added={added} version={version} onDone={() => setAdded(undefined)} />}
       {servers?.length === 0 ? (
-        <EmptyState title="No servers yet">Add one above, then start vpn-server with its token; it shows up within 15 seconds.</EmptyState>
+        <EmptyState title="No servers yet">Add one, then start vpn-server with its token; it shows up within 15 seconds.</EmptyState>
       ) : (
         <Panel flush>
           <List label="Servers" rows={servers} columns={columns} empty="No servers yet" getRowId={(s) => s.id} />

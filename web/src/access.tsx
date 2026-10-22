@@ -1,4 +1,4 @@
-import { Badge, Button, Checkbox, PageHeader, Panel, Switch, TextField, type Column } from "@openasy/ui";
+import { Badge, Button, Checkbox, Dialog, PageHeader, Panel, Switch, TextField, type Column } from "@openasy/ui";
 import { useAuth } from "@openasy/auth/react";
 import { Pencil, Plus, Trash2, X } from "lucide-react";
 import { useState, type FormEvent } from "react";
@@ -23,11 +23,13 @@ export function AccessPage({ call }: { call: Call }) {
 
 function Groups({ call, groups, onChange }: { call: Call; groups: Group[] | undefined; onChange: () => void }) {
   const { can } = useAuth();
+  const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const action = useAction();
+  const close = () => (setAdding(false), setName(""), action.clear());
   const add = async (e: FormEvent) => {
     e.preventDefault();
-    if (await action.run(() => call("/api/v1/groups", { method: "POST", body: JSON.stringify({ name }) }))) (setName(""), onChange());
+    if (await action.run(() => call("/api/v1/groups", { method: "POST", body: JSON.stringify({ name }) }))) (close(), onChange());
   };
   const columns: Column<Group>[] = [
     { id: "name", header: "Group", cell: (g) => g.name, sortValue: (g) => g.name },
@@ -53,19 +55,41 @@ function Groups({ call, groups, onChange }: { call: Call; groups: Group[] | unde
       : []),
   ];
   return (
-    <Panel title="Groups" description="Add people to groups on their page.">
-      <div className="flex flex-col gap-3">
-        <Problem error={action.error} />
-        {can("admin") && (
-          <form onSubmit={add} className="flex flex-wrap items-end gap-2">
-            <TextField label="New group" value={name} onChange={(e) => setName(e.target.value)} placeholder="Backend engineers" />
-            <Button type="submit" icon={<Plus />} loading={action.busy} disabled={!name}>
+    <Panel
+      title="Groups"
+      description="Add people to groups on their page."
+      actions={
+        can("admin") && (
+          <Button size="sm" icon={<Plus />} onClick={() => setAdding(true)}>
+            Add group
+          </Button>
+        )
+      }
+      flush
+    >
+      {!adding && <Problem error={action.error} />}
+      <Dialog
+        open={adding}
+        onOpenChange={(open) => !open && close()}
+        size="sm"
+        title="Add a group"
+        description="Add people to it on their page, and let it reach networks under IP groups."
+        onSubmit={add}
+        footer={
+          <>
+            <Button type="button" onClick={close}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" loading={action.busy} disabled={!name}>
               Add group
             </Button>
-          </form>
-        )}
-        <List label="Groups" rows={groups} columns={columns} empty="No groups yet" getRowId={(g) => g.id} />
-      </div>
+          </>
+        }
+      >
+        <Problem error={action.error} title="Not added" />
+        <TextField label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Backend engineers" />
+      </Dialog>
+      <List label="Groups" rows={groups} columns={columns} empty="No groups yet" getRowId={(g) => g.id} />
     </Panel>
   );
 }
@@ -127,8 +151,7 @@ function IpGroups({ call, ipGroups, groups, onChange }: { call: Call; ipGroups: 
         title="IP groups"
         description="Servers apply a change within one heartbeat, without disconnecting anyone."
         actions={
-          can("admin") &&
-          !editing && (
+          can("admin") && (
             <Button size="sm" icon={<Plus />} onClick={() => setEditing("new")}>
               Add IP group
             </Button>
@@ -159,50 +182,57 @@ function IpGroupEditor({ call, ipGroup, groups, onDone }: { call: Call; ipGroup?
     if (ok) onDone(true);
   };
   return (
-    <Panel title={ipGroup ? `Edit ${ipGroup.name}` : "Add an IP group"}>
-      <form onSubmit={submit} className="flex flex-col gap-4" style={{ maxWidth: 720 }}>
-        <Problem error={action.error} title="Not saved" />
-        {!ipGroup && <TextField label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Production databases" />}
-        <fieldset className="flex flex-col gap-2">
-          <legend className="mb-2 text-sm font-medium">Networks</legend>
-          {networks.map((n, i) => (
-            <div key={i} className="flex flex-wrap items-end gap-2">
-              <TextField label="Network" mono value={n.cidr} onChange={(e) => set(i, { cidr: e.target.value })} placeholder="172.16.20.0/24" />
-              <TextField label="Ports" mono value={n.ports} onChange={(e) => set(i, { ports: e.target.value })} placeholder="tcp/5432, udp/53 or any" />
-              <TextField label="Note" value={n.note} onChange={(e) => set(i, { note: e.target.value })} placeholder="Postgres primary" />
-              <Button type="button" size="sm" variant="ghost" icon={<X />} aria-label={`Remove network ${i + 1}`} onClick={() => setNetworks(networks.filter((_, j) => j !== i))}>
-                Remove
-              </Button>
-            </div>
-          ))}
-          <div>
-            <Button type="button" size="sm" icon={<Plus />} onClick={() => setNetworks([...networks, { cidr: "", ports: "any", note: "" }])}>
-              Add network
-            </Button>
-          </div>
-        </fieldset>
-        <Switch checked={fullTunnel} onCheckedChange={setFullTunnel} label="Full tunnel" description="Send all of the device's traffic through the VPN, not only these networks. Use it where traffic must leave from the office address." />
-        <fieldset className="flex flex-col gap-2">
-          <legend className="mb-2 text-sm font-medium">Groups that may reach these networks</legend>
-          {groups.length ? (
-            <div className="flex flex-wrap gap-3">
-              {groups.map((g) => (
-                <Checkbox key={g.id} label={g.name} checked={allowed.includes(g.name)} onChange={(e) => setAllowed(e.target.checked ? [...allowed, g.name] : allowed.filter((x) => x !== g.name))} />
-              ))}
-            </div>
-          ) : (
-            <span className="text-sm text-fg-muted">Add a group below first.</span>
-          )}
-        </fieldset>
-        <div className="flex gap-2">
+    <Dialog
+      open
+      onOpenChange={(open) => !open && onDone(false)}
+      size="lg"
+      title={ipGroup ? `Edit ${ipGroup.name}` : "Add an IP group"}
+      description="Networks and ports, and the groups that may reach them."
+      onSubmit={submit}
+      footer={
+        <>
+          <Button type="button" onClick={() => onDone(false)}>
+            Cancel
+          </Button>
           <Button type="submit" variant="primary" loading={action.busy} disabled={!ipGroup && !name}>
             {ipGroup ? "Save" : "Add IP group"}
           </Button>
-          <Button type="button" variant="ghost" onClick={() => onDone(false)}>
-            Cancel
+        </>
+      }
+    >
+      <Problem error={action.error} title="Not saved" />
+      {!ipGroup && <TextField label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Production databases" />}
+      <fieldset className="flex flex-col gap-2">
+        <legend className="mb-2 text-sm font-medium">Networks</legend>
+        {networks.map((n, i) => (
+          <div key={i} className="flex flex-wrap items-end gap-2">
+            <TextField label="Network" mono value={n.cidr} onChange={(e) => set(i, { cidr: e.target.value })} placeholder="172.16.20.0/24" />
+            <TextField label="Ports" mono value={n.ports} onChange={(e) => set(i, { ports: e.target.value })} placeholder="tcp/5432, udp/53 or any" />
+            <TextField label="Note" value={n.note} onChange={(e) => set(i, { note: e.target.value })} placeholder="Postgres primary" />
+            <Button type="button" size="sm" variant="ghost" icon={<X />} aria-label={`Remove network ${i + 1}`} onClick={() => setNetworks(networks.filter((_, j) => j !== i))}>
+              Remove
+            </Button>
+          </div>
+        ))}
+        <div>
+          <Button type="button" size="sm" icon={<Plus />} onClick={() => setNetworks([...networks, { cidr: "", ports: "any", note: "" }])}>
+            Add network
           </Button>
         </div>
-      </form>
-    </Panel>
+      </fieldset>
+      <Switch checked={fullTunnel} onCheckedChange={setFullTunnel} label="Full tunnel" description="Send all of the device's traffic through the VPN, not only these networks. Use it where traffic must leave from the office address." />
+      <fieldset className="flex flex-col gap-2">
+        <legend className="mb-2 text-sm font-medium">Groups that may reach these networks</legend>
+        {groups.length ? (
+          <div className="flex flex-wrap gap-3">
+            {groups.map((g) => (
+              <Checkbox key={g.id} label={g.name} checked={allowed.includes(g.name)} onChange={(e) => setAllowed(e.target.checked ? [...allowed, g.name] : allowed.filter((x) => x !== g.name))} />
+            ))}
+          </div>
+        ) : (
+          <span className="text-sm text-fg-muted">Add a group below first.</span>
+        )}
+      </fieldset>
+    </Dialog>
   );
 }

@@ -1,6 +1,6 @@
-import { Badge, Button, Callout, Checkbox, EmptyState, navigate, PageHeader, Panel, StatusBadge, TextField, type Column } from "@openasy/ui";
+import { Badge, Button, Callout, Checkbox, Dialog, EmptyState, navigate, PageHeader, Panel, StatusBadge, TextField, type Column } from "@openasy/ui";
 import { useAuth } from "@openasy/auth/react";
-import { Ban, Download, Laptop, Plus, Trash2, UserCheck, UserX } from "lucide-react";
+import { Ban, Check, Download, Laptop, Plus, Trash2, UserCheck, UserX } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import type { Device, Group, Person } from "./api.ts";
 import { SessionTable } from "./sessions.tsx";
@@ -48,7 +48,7 @@ export function PeoplePage({ call }: { call: Call }) {
         }
       />
       {adding && <AddPerson call={call} groups={groups.data?.groups ?? []} onDone={(p) => (setAdding(false), reload(), p && navigate(`/people/${p.id}`))} />}
-      {data?.people.length === 0 && !adding ? (
+      {data?.people.length === 0 ? (
         <EmptyState title="Nobody yet" action={can("editor") && <Button onClick={() => setAdding(true)}>Add the first person</Button>}>
           Add a person, then a device for them, and send them the .ovpn file it gives you.
         </EmptyState>
@@ -72,27 +72,31 @@ function AddPerson({ call, groups, onDone }: { call: Call; groups: Group[]; onDo
     if (await action.run(async () => (created = await call<Person>("/api/v1/people", { method: "POST", body: JSON.stringify({ name, email, groups: chosen }) })))) onDone(created);
   };
   return (
-    <Panel title="Add a person" description="They get no sign-in to this VPN product; that is under Members. Here they only get devices that may connect.">
-      <form onSubmit={submit} className="flex flex-col gap-3" style={{ maxWidth: 560 }}>
-        <Problem error={action.error} title="Not added" />
-        <div className="flex flex-wrap gap-2">
-          <TextField label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Dana Kim" />
-          <TextField label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="dana@example.com" />
-        </div>
-        <fieldset className="flex flex-col gap-2">
-          <legend className="mb-2 text-sm font-medium">Groups</legend>
-          <GroupPicker groups={groups} value={chosen} onChange={setChosen} />
-        </fieldset>
-        <div className="flex gap-2">
+    <Dialog
+      open
+      onOpenChange={(open) => !open && onDone()}
+      title="Add a person"
+      description="They get devices that may connect. Signing in to this VPN product is under Members."
+      onSubmit={submit}
+      footer={
+        <>
+          <Button type="button" onClick={() => onDone()}>
+            Cancel
+          </Button>
           <Button type="submit" variant="primary" loading={action.busy} disabled={!name || !email}>
             Add person
           </Button>
-          <Button type="button" variant="ghost" onClick={() => onDone()}>
-            Cancel
-          </Button>
-        </div>
-      </form>
-    </Panel>
+        </>
+      }
+    >
+      <Problem error={action.error} title="Not added" />
+      <TextField label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Dana Kim" />
+      <TextField label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="dana@example.com" />
+      <fieldset className="flex flex-col gap-2">
+        <legend className="mb-2 text-sm font-medium">Groups</legend>
+        <GroupPicker groups={groups} value={chosen} onChange={setChosen} />
+      </fieldset>
+    </Dialog>
   );
 }
 
@@ -167,9 +171,11 @@ export function PersonPage({ call, id }: { call: Call; id: string }) {
 
 function Devices({ call, person, devices, onChange }: { call: Call; person: Person; devices: Device[] | undefined; onChange: () => void }) {
   const { can } = useAuth();
+  const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [file, setFile] = useState<{ name: string; ovpn: string }>();
   const action = useAction();
+  const close = () => (setAdding(false), setFile(undefined), setName(""), action.clear());
   const add = async (e: FormEvent) => {
     e.preventDefault();
     const ok = await action.run(async () => {
@@ -178,7 +184,7 @@ function Devices({ call, person, devices, onChange }: { call: Call; person: Pers
       setFile(f);
       download(f.name, f.ovpn);
     });
-    if (ok) (setName(""), onChange());
+    if (ok) onChange();
   };
   const revoke = (d: Device) =>
     window.confirm(`Revoke ${d.name}? It is disconnected within 15 seconds and its .ovpn file stops working for good.`) &&
@@ -218,38 +224,64 @@ function Devices({ call, person, devices, onChange }: { call: Call; person: Pers
       : []),
   ];
   return (
-    <Panel title="Devices" description="One certificate per device, valid for a year. A lost or replaced device is revoked; add a new one for the new device.">
+    <Panel
+      title="Devices"
+      description="One certificate per device, valid for a year. A lost or replaced device is revoked; add a new one for the new device."
+      actions={
+        can("editor") &&
+        person.status === "active" && (
+          <Button size="sm" icon={<Laptop />} onClick={() => setAdding(true)}>
+            Add device
+          </Button>
+        )
+      }
+    >
       <div className="flex flex-col gap-3">
-        {file && (
-          <Callout
-            tone="warning"
-            title="Send this file to them now"
-            action={
-              <Button size="sm" onClick={() => setFile(undefined)}>
+        {!adding && <Problem error={action.error} />}
+        {file ? (
+          <Dialog
+            open={adding}
+            onOpenChange={(open) => !open && close()}
+            icon={<Check aria-hidden className="size-4" />}
+            iconTone="success"
+            title="Device added. Send its file now"
+            description={`${file.name} downloaded. It holds the device's private key; they import it into an OpenVPN client.`}
+            footer={
+              <Button variant="primary" onClick={close}>
                 Done
               </Button>
             }
           >
-            <span className="flex flex-col gap-2">
-              <span>
-                {file.name} holds the device's private key. This VPN does not keep it, so it cannot be downloaded again once you leave this page. Send it privately; they import it into an OpenVPN client.
-              </span>
-              <span>
-                <Button size="sm" icon={<Download />} onClick={() => download(file.name, file.ovpn)}>
-                  Download again
-                </Button>
-              </span>
+            <Callout tone="warning" title="This VPN does not keep the file">
+              It cannot be downloaded again once this dialog closes. Send it privately.
+            </Callout>
+            <span>
+              <Button icon={<Download />} onClick={() => download(file.name, file.ovpn)}>
+                Download again
+              </Button>
             </span>
-          </Callout>
-        )}
-        <Problem error={action.error} />
-        {can("editor") && person.status === "active" && (
-          <form onSubmit={add} className="flex flex-wrap items-end gap-2">
-            <TextField label="New device" value={name} onChange={(e) => setName(e.target.value)} placeholder="Work laptop" />
-            <Button type="submit" variant="primary" icon={<Laptop />} loading={action.busy} disabled={!name}>
-              Add device and download
-            </Button>
-          </form>
+          </Dialog>
+        ) : (
+          <Dialog
+            open={adding}
+            onOpenChange={(open) => !open && close()}
+            title={`Add a device for ${person.name}`}
+            description="It gets its own certificate and VPN address. Its .ovpn file downloads once."
+            onSubmit={add}
+            footer={
+              <>
+                <Button type="button" onClick={close}>
+                  Cancel
+                </Button>
+                <Button type="submit" variant="primary" icon={<Download />} loading={action.busy} disabled={!name}>
+                  Add and download
+                </Button>
+              </>
+            }
+          >
+            <Problem error={action.error} title="Not added" />
+            <TextField label="Device" value={name} onChange={(e) => setName(e.target.value)} placeholder="Work laptop" />
+          </Dialog>
         )}
         {devices && devices.length === 0 ? (
           <EmptyState title="No devices yet">

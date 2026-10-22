@@ -1,4 +1,4 @@
-import { AppShell, BrandProvider, Button, EmptyState, navigate, PageHeader, PRODUCT_IDS, usePath, type ProductId } from "@openasy/ui";
+import { AppShell, BrandProvider, Button, EmptyState, navigate, PageHeader, PRODUCT_IDS, usePath, type ProductId, useThemePreference } from "@openasy/ui";
 import { AccountSettings, AuthGate, MembersSettings, SignInSettings, TokensSettings, useAuth } from "@openasy/auth/react";
 import { Activity, KeyRound, LogIn, LogOut, Network, Server as ServerIcon, UserRound, Users, UsersRound } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -28,6 +28,7 @@ const SETTINGS = {
 } as const;
 
 function Product() {
+  const [theme, setTheme] = useThemePreference();
   const { me, can, signOut } = useAuth();
   const call = useApi();
   const [version, setVersion] = useState<string>();
@@ -80,6 +81,8 @@ function Product() {
       }}
       footerNav={footerNav}
       user={{ name: me.user.name, role: roleName }}
+      theme={theme}
+      onThemeChange={setTheme}
     >
       {route.page === "person" ? (
         <PersonPage key={route.id} call={call} id={route.id} />
@@ -114,9 +117,10 @@ function Product() {
 }
 
 export function App() {
+  const [theme] = useThemePreference();
   return (
     // No organization until branding is configurable (ADR 0004); the library's default is a placeholder.
-    <BrandProvider brand={{ name: "OpenAsy", organization: undefined }} className="min-h-screen">
+    <BrandProvider theme={theme} brand={{ name: "OpenAsy", organization: undefined }} className="min-h-screen">
       <AuthGate product="OpenAsy VPN">
         <Product />
       </AuthGate>
