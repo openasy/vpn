@@ -13,13 +13,14 @@ afterAll(() => app.close());
 
 const post = (path: string, body: unknown) => app.admin(path, { method: "POST", body: JSON.stringify(body) });
 const patch = (path: string, body: unknown) => app.admin(path, { method: "PATCH", body: JSON.stringify(body) });
-const config = async () => (await (await app.agent("/api/v1/servers/edge-1/config")).json()) as {
-  version: string;
-  ca: string;
-  cert: string;
-  crl: string;
-  clients: Array<{ cn: string; ip: string; routes: string[]; fullTunnel: boolean; allow: Array<{ cidr: string; proto: string; ports: number[] }> }>;
-};
+const config = async () =>
+  (await (await app.agent("/api/v1/servers/edge-1/config")).json()) as {
+    version: string;
+    ca: string;
+    cert: string;
+    crl: string;
+    clients: Array<{ cn: string; ip: string; routes: string[]; fullTunnel: boolean; allow: Array<{ cidr: string; proto: string; ports: number[] }> }>;
+  };
 const pemBlock = (text: string, tag: string) => text.match(new RegExp(`<${tag}>\\n([\\s\\S]*?)\\n</${tag}>`))?.[1];
 
 describe("management API", () => {
@@ -44,7 +45,11 @@ function browser(base: string) {
   return async (path: string, init: { method?: string; body?: unknown; origin?: string } = {}) => {
     const res = await fetch(base + path, {
       method: init.method ?? (init.body === undefined ? "GET" : "POST"),
-      headers: { origin: init.origin ?? base, cookie: [...jar].map(([k, v]) => `${k}=${v}`).join("; "), ...(init.body !== undefined && { "content-type": "application/json" }) },
+      headers: {
+        origin: init.origin ?? base,
+        cookie: [...jar].map(([k, v]) => `${k}=${v}`).join("; "),
+        ...(init.body !== undefined && { "content-type": "application/json" }),
+      },
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
     });
     for (const c of res.headers.getSetCookie()) {
@@ -113,7 +118,10 @@ describe("people, groups and devices", () => {
 
     const ipGroup = await post("/api/v1/ip-groups", {
       name: "Production databases",
-      networks: [{ cidr: "172.16.20.0/24", ports: "tcp/5432", note: "Postgres" }, { cidr: "172.16.40.12/32", ports: "tcp/6379" }],
+      networks: [
+        { cidr: "172.16.20.0/24", ports: "tcp/5432", note: "Postgres" },
+        { cidr: "172.16.40.12/32", ports: "tcp/6379" },
+      ],
       allowedGroups: ["Backend engineers"],
     });
     expect(ipGroup.status).toBe(201);
@@ -224,7 +232,9 @@ describe("people, groups and devices", () => {
 describe("client configs", () => {
   it("need VPN_PUBLIC_HOST", async () => {
     const noHost = await startApp({ version: "1.2.3", publicHost: undefined });
-    const person = (await (await noHost.admin("/api/v1/people", { method: "POST", body: JSON.stringify({ name: "A", email: "a@example.com" }) })).json()) as { id: string };
+    const person = (await (await noHost.admin("/api/v1/people", { method: "POST", body: JSON.stringify({ name: "A", email: "a@example.com" }) })).json()) as {
+      id: string;
+    };
     const res = await noHost.admin(`/api/v1/people/${person.id}/devices`, { method: "POST", body: JSON.stringify({ name: "Laptop" }) });
     expect(res.status).toBe(409);
     expect(((await res.json()) as { detail: string }).detail).toContain("VPN_PUBLIC_HOST");
@@ -233,27 +243,55 @@ describe("client configs", () => {
 
   it("list every listener the servers report, UDP first", async () => {
     const a = await startApp({ version: "1.2.3" });
-    for (const [id, listen] of [["edge-1-tcp", "tcp/443"], ["edge-1", "udp/1194"]]) {
+    for (const [id, listen] of [
+      ["edge-1-tcp", "tcp/443"],
+      ["edge-1", "udp/1194"],
+    ]) {
       await a.agent("/api/v1/servers/heartbeat", { method: "POST", body: JSON.stringify({ id, version: "1.2.3", listen, openvpnRunning: true }) });
     }
-    const person = (await (await a.admin("/api/v1/people", { method: "POST", body: JSON.stringify({ name: "B", email: "b@example.com" }) })).json()) as { id: string };
-    const { ovpn } = (await (await a.admin(`/api/v1/people/${person.id}/devices`, { method: "POST", body: JSON.stringify({ name: "Laptop" }) })).json()) as { ovpn: string };
+    const person = (await (await a.admin("/api/v1/people", { method: "POST", body: JSON.stringify({ name: "B", email: "b@example.com" }) })).json()) as {
+      id: string;
+    };
+    const { ovpn } = (await (await a.admin(`/api/v1/people/${person.id}/devices`, { method: "POST", body: JSON.stringify({ name: "Laptop" }) })).json()) as {
+      ovpn: string;
+    };
     expect(ovpn.match(/^remote .*$/gm)).toEqual(["remote vpn.example.com 1194 udp", "remote vpn.example.com 443 tcp-client"]);
     await a.close();
   });
 
   it("list each server at its own address, and leave out servers that never reported", async () => {
     const a = await startApp({ version: "1.2.3", publicHost: undefined });
-    const servers = [["ist-1", "ist.vpn.example.com", "tcp/443"], ["fra-1", "fra.vpn.example.com", "udp/1194"], ["ist-2", "ist.vpn.example.com", "udp/1194"], ["new-1", "new.vpn.example.com", null]] as const;
+    const servers = [
+      ["ist-1", "ist.vpn.example.com", "tcp/443"],
+      ["fra-1", "fra.vpn.example.com", "udp/1194"],
+      ["ist-2", "ist.vpn.example.com", "udp/1194"],
+      ["new-1", "new.vpn.example.com", null],
+    ] as const;
     for (const [id, address, listen] of servers) {
-      const { enrollToken } = (await (await a.admin("/api/v1/servers", { method: "POST", body: JSON.stringify({ id, address }) })).json()) as { enrollToken: string };
+      const { enrollToken } = (await (await a.admin("/api/v1/servers", { method: "POST", body: JSON.stringify({ id, address }) })).json()) as {
+        enrollToken: string;
+      };
       if (!listen) continue;
-      const { secret } = (await (await fetch(`${a.base}/api/v1/servers/enroll`, { method: "POST", body: JSON.stringify({ token: enrollToken }) })).json()) as { secret: string };
-      await fetch(`${a.base}/api/v1/servers/heartbeat`, { method: "POST", headers: { authorization: `Bearer ${secret}` }, body: JSON.stringify({ id, version: "1.2.3", listen, openvpnRunning: true }) });
+      const { secret } = (await (await fetch(`${a.base}/api/v1/servers/enroll`, { method: "POST", body: JSON.stringify({ token: enrollToken }) })).json()) as {
+        secret: string;
+      };
+      await fetch(`${a.base}/api/v1/servers/heartbeat`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${secret}` },
+        body: JSON.stringify({ id, version: "1.2.3", listen, openvpnRunning: true }),
+      });
     }
-    const person = (await (await a.admin("/api/v1/people", { method: "POST", body: JSON.stringify({ name: "C", email: "c@example.com" }) })).json()) as { id: string };
-    const { ovpn } = (await (await a.admin(`/api/v1/people/${person.id}/devices`, { method: "POST", body: JSON.stringify({ name: "Laptop" }) })).json()) as { ovpn: string };
-    expect(ovpn.match(/^remote .*$/gm)).toEqual(["remote fra.vpn.example.com 1194 udp", "remote ist.vpn.example.com 1194 udp", "remote ist.vpn.example.com 443 tcp-client"]);
+    const person = (await (await a.admin("/api/v1/people", { method: "POST", body: JSON.stringify({ name: "C", email: "c@example.com" }) })).json()) as {
+      id: string;
+    };
+    const { ovpn } = (await (await a.admin(`/api/v1/people/${person.id}/devices`, { method: "POST", body: JSON.stringify({ name: "Laptop" }) })).json()) as {
+      ovpn: string;
+    };
+    expect(ovpn.match(/^remote .*$/gm)).toEqual([
+      "remote fra.vpn.example.com 1194 udp",
+      "remote ist.vpn.example.com 1194 udp",
+      "remote ist.vpn.example.com 443 tcp-client",
+    ]);
     await a.close();
   });
 });
@@ -262,13 +300,30 @@ describe("sessions", () => {
   let s: Awaited<ReturnType<typeof startApp>>;
   let device: { id: string };
   const beat = (sessions: unknown, id = "edge-1") =>
-    s.agent("/api/v1/servers/heartbeat", { method: "POST", body: JSON.stringify({ id, version: "1.2.3", listen: "udp/1194", openvpnRunning: true, sessions }) });
-  const live = (cn: string, extra = {}) => ({ cn, realAddress: "203.0.113.24:51820", vpnIp: "10.8.0.2", bytesIn: 1200, bytesOut: 34000, connectedAt: "2026-10-19T10:00:00Z", ...extra });
+    s.agent("/api/v1/servers/heartbeat", {
+      method: "POST",
+      body: JSON.stringify({ id, version: "1.2.3", listen: "udp/1194", openvpnRunning: true, sessions }),
+    });
+  const live = (cn: string, extra = {}) => ({
+    cn,
+    realAddress: "203.0.113.24:51820",
+    vpnIp: "10.8.0.2",
+    bytesIn: 1200,
+    bytesOut: 34000,
+    connectedAt: "2026-10-19T10:00:00Z",
+    ...extra,
+  });
 
   beforeAll(async () => {
     s = await startApp({ version: "1.2.3" });
-    const person = (await (await s.admin("/api/v1/people", { method: "POST", body: JSON.stringify({ name: "Dana Kim", email: "dana@example.com" }) })).json()) as { id: string };
-    device = ((await (await s.admin(`/api/v1/people/${person.id}/devices`, { method: "POST", body: JSON.stringify({ name: "Laptop" }) })).json()) as { device: { id: string } }).device;
+    const person = (await (
+      await s.admin("/api/v1/people", { method: "POST", body: JSON.stringify({ name: "Dana Kim", email: "dana@example.com" }) })
+    ).json()) as { id: string };
+    device = (
+      (await (await s.admin(`/api/v1/people/${person.id}/devices`, { method: "POST", body: JSON.stringify({ name: "Laptop" }) })).json()) as {
+        device: { id: string };
+      }
+    ).device;
   });
   afterAll(() => s.close());
 
@@ -276,7 +331,18 @@ describe("sessions", () => {
     expect((await beat([live(device.id)])).status).toBe(202);
     const { sessions } = (await (await s.admin("/api/v1/sessions")).json()) as { sessions: Array<Record<string, unknown>> };
     expect(sessions).toEqual([
-      { serverId: "edge-1", deviceId: device.id, deviceName: "Laptop", personId: expect.any(String), personName: "Dana Kim", realAddress: "203.0.113.24:51820", vpnIp: "10.8.0.2", bytesIn: 1200, bytesOut: 34000, connectedAt: "2026-10-19T10:00:00.000Z" },
+      {
+        serverId: "edge-1",
+        deviceId: device.id,
+        deviceName: "Laptop",
+        personId: expect.any(String),
+        personName: "Dana Kim",
+        realAddress: "203.0.113.24:51820",
+        vpnIp: "10.8.0.2",
+        bytesIn: 1200,
+        bytesOut: 34000,
+        connectedAt: "2026-10-19T10:00:00.000Z",
+      },
     ]);
     expect(await (await fetch(`${s.base}/metrics`)).text()).toContain("openasy_vpn_sessions 1");
   });

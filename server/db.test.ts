@@ -29,8 +29,21 @@ describe("openDb", () => {
     old.close();
 
     const db = openDb(path);
-    expect(db.prepare("SELECT id, address, legacy, secret_hash, version, listen, openvpn_running, config_version, last_seen, created_at FROM servers").all()).toEqual([
-      { id: "edge-1", address: null, legacy: 1, secret_hash: null, version: "0.5.0", listen: "udp/1194", openvpn_running: 1, config_version: "abc", last_seen: "2026-10-01T00:00:00.000Z", created_at: "2026-10-01T00:00:00.000Z" },
+    expect(
+      db.prepare("SELECT id, address, legacy, secret_hash, version, listen, openvpn_running, config_version, last_seen, created_at FROM servers").all(),
+    ).toEqual([
+      {
+        id: "edge-1",
+        address: null,
+        legacy: 1,
+        secret_hash: null,
+        version: "0.5.0",
+        listen: "udp/1194",
+        openvpn_running: 1,
+        config_version: "abc",
+        last_seen: "2026-10-01T00:00:00.000Z",
+        created_at: "2026-10-01T00:00:00.000Z",
+      },
     ]);
     db.close();
   });

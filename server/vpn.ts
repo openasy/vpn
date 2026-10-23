@@ -223,7 +223,9 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
 
   function listGroups(): Group[] {
     return db
-      .prepare("SELECT g.id, g.name, COUNT(pg.person_id) AS people FROM groups g LEFT JOIN person_groups pg ON pg.group_id = g.id GROUP BY g.id ORDER BY g.name")
+      .prepare(
+        "SELECT g.id, g.name, COUNT(pg.person_id) AS people FROM groups g LEFT JOIN person_groups pg ON pg.group_id = g.id GROUP BY g.id ORDER BY g.name",
+      )
       .all() as unknown as Group[];
   }
 
@@ -244,10 +246,13 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
 
   function person(id: string): Person {
     const row = db.prepare("SELECT id, name, email, status, created_at FROM people WHERE id = ?").get(id) as
-      | { id: string; name: string; email: string; status: Person["status"]; created_at: string }
-      | undefined;
+      { id: string; name: string; email: string; status: Person["status"]; created_at: string } | undefined;
     if (!row) throw notFound("Person");
-    const groups = (db.prepare("SELECT g.name FROM person_groups pg JOIN groups g ON g.id = pg.group_id WHERE pg.person_id = ? ORDER BY g.name").all(id) as Array<{ name: string }>).map((g) => g.name);
+    const groups = (
+      db.prepare("SELECT g.name FROM person_groups pg JOIN groups g ON g.id = pg.group_id WHERE pg.person_id = ? ORDER BY g.name").all(id) as Array<{
+        name: string;
+      }>
+    ).map((g) => g.name);
     const { n } = db.prepare("SELECT COUNT(*) AS n FROM devices WHERE person_id = ? AND revoked_at IS NULL").get(id) as { n: number };
     return { id: row.id, name: row.name, email: row.email, status: row.status, groups, devices: n, createdAt: row.created_at };
   }
@@ -305,7 +310,11 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
     const row = db.prepare("SELECT id, name, full_tunnel FROM ip_groups WHERE id = ?").get(id) as { id: string; name: string; full_tunnel: number } | undefined;
     if (!row) throw notFound("IP group");
     const networks = db.prepare("SELECT cidr, ports, note FROM ip_group_networks WHERE ip_group_id = ? ORDER BY rowid").all(id) as unknown as IpNetwork[];
-    const allowedGroups = (db.prepare("SELECT g.name FROM ip_group_access a JOIN groups g ON g.id = a.group_id WHERE a.ip_group_id = ? ORDER BY g.name").all(id) as Array<{ name: string }>).map((g) => g.name);
+    const allowedGroups = (
+      db.prepare("SELECT g.name FROM ip_group_access a JOIN groups g ON g.id = a.group_id WHERE a.ip_group_id = ? ORDER BY g.name").all(id) as Array<{
+        name: string;
+      }>
+    ).map((g) => g.name);
     return { id: row.id, name: row.name, fullTunnel: row.full_tunnel === 1, networks, allowedGroups };
   }
 
@@ -364,7 +373,15 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
 
   // ---- devices ------------------------------------------------------------
 
-  const toDevice = (r: { id: string; person_id: string; name: string; vpn_ip: string; not_after: string; created_at: string; revoked_at: string | null }): Device => ({
+  const toDevice = (r: {
+    id: string;
+    person_id: string;
+    name: string;
+    vpn_ip: string;
+    not_after: string;
+    created_at: string;
+    revoked_at: string | null;
+  }): Device => ({
     id: r.id,
     personId: r.person_id,
     name: r.name,
@@ -390,13 +407,27 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
   async function createDevice(personId: string, body: { name?: unknown }): Promise<{ device: Device; ovpn: string }> {
     const p = person(personId);
     if (p.status !== "active") throw new VpnError(409, "conflict", `${p.name} is suspended; activate them before adding a device.`);
-    if (!remotes().length) throw new VpnError(409, "conflict", "No server has an address clients can connect to. Give a server its address under Servers, or set VPN_PUBLIC_HOST, before adding devices.");
+    if (!remotes().length)
+      throw new VpnError(
+        409,
+        "conflict",
+        "No server has an address clients can connect to. Give a server its address under Servers, or set VPN_PUBLIC_HOST, before adding devices.",
+      );
     const name = typeof body.name === "string" ? body.name.trim() : "";
-    if (!name || name.length > 100) throw invalid("name is required, at most 100 characters, for example \"Work laptop\".");
+    if (!name || name.length > 100) throw invalid('name is required, at most 100 characters, for example "Work laptop".');
     const id = randomUUID();
     const cert = await issue(ca(), "client", id);
     const ip = allocateIp();
-    db.prepare("INSERT INTO devices (id, person_id, name, serial, vpn_ip, cert, not_after, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(id, personId, name, cert.serial, ip, cert.cert, cert.notAfter, now());
+    db.prepare("INSERT INTO devices (id, person_id, name, serial, vpn_ip, cert, not_after, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
+      id,
+      personId,
+      name,
+      cert.serial,
+      ip,
+      cert.cert,
+      cert.notAfter,
+      now(),
+    );
     const device = toDevice(db.prepare("SELECT * FROM devices WHERE id = ?").get(id) as Parameters<typeof toDevice>[0]);
     return { device, ovpn: clientConfig(p.name, name, cert.cert, cert.key) };
   }
@@ -420,7 +451,11 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
    * not known yet.
    */
   function remotes(): Array<{ host: string; proto: "udp" | "tcp"; port: number }> {
-    const rows = db.prepare("SELECT id, address, listen FROM servers WHERE last_seen IS NOT NULL ORDER BY id").all() as Array<{ id: string; address: string | null; listen: string | null }>;
+    const rows = db.prepare("SELECT id, address, listen FROM servers WHERE last_seen IS NOT NULL ORDER BY id").all() as Array<{
+      id: string;
+      address: string | null;
+      listen: string | null;
+    }>;
     const found = new Map<string, { host: string; proto: "udp" | "tcp"; port: number }>();
     for (const r of rows.length ? rows : [{ id: "", address: null, listen: null }]) {
       const host = r.address ?? opts.publicHost;
@@ -496,7 +531,13 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
     let row = db.prepare("SELECT cert, key FROM server_certs WHERE server_id = ?").get(serverId) as { cert: string; key: string } | undefined;
     if (!row) {
       const cert = await issue(ca(), "server", serverId);
-      db.prepare("INSERT INTO server_certs (server_id, serial, cert, key, not_after) VALUES (?, ?, ?, ?, ?)").run(serverId, cert.serial, cert.cert, opts.keyring.seal(cert.key), cert.notAfter);
+      db.prepare("INSERT INTO server_certs (server_id, serial, cert, key, not_after) VALUES (?, ?, ?, ?, ?)").run(
+        serverId,
+        cert.serial,
+        cert.cert,
+        opts.keyring.seal(cert.key),
+        cert.notAfter,
+      );
       row = cert;
     } else {
       row = { cert: row.cert, key: open(row.key) };
@@ -664,7 +705,9 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
     db.exec("BEGIN");
     try {
       db.prepare("DELETE FROM sessions WHERE server_id = ?").run(serverId);
-      const insert = db.prepare("INSERT OR REPLACE INTO sessions (server_id, cn, real_address, vpn_ip, bytes_in, bytes_out, connected_at) VALUES (?, ?, ?, ?, ?, ?, ?)");
+      const insert = db.prepare(
+        "INSERT OR REPLACE INTO sessions (server_id, cn, real_address, vpn_ip, bytes_in, bytes_out, connected_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      );
       for (const x of sessions) insert.run(serverId, x.cn, x.realAddress, x.vpnIp, x.bytesIn, x.bytesOut, x.connectedAt);
       // A disconnect for a session that is gone is done.
       db.prepare("DELETE FROM pending_disconnects WHERE server_id = ? AND cn NOT IN (SELECT cn FROM sessions WHERE server_id = ?)").run(serverId, serverId);

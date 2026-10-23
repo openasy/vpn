@@ -137,7 +137,11 @@ function parse(argv: string[]) {
 function table(head: string[], rows: string[][]): string {
   if (!rows.length) return "";
   const widths = head.map((h, i) => Math.max(h.length, ...rows.map((r) => (r[i] ?? "").length)));
-  const line = (r: string[]) => r.map((c, i) => (i === r.length - 1 ? c : c.padEnd(widths[i]!))).join("  ").trimEnd();
+  const line = (r: string[]) =>
+    r
+      .map((c, i) => (i === r.length - 1 ? c : c.padEnd(widths[i]!)))
+      .join("  ")
+      .trimEnd();
   return [line(head), ...rows.map(line)].join("\n") + "\n";
 }
 
@@ -145,11 +149,15 @@ const bytes = (n: number) => {
   const u = ["B", "KiB", "MiB", "GiB", "TiB"];
   let i = 0;
   let v = n;
-  while (v >= 1024 && i < u.length - 1) (v /= 1024), i++;
+  while (v >= 1024 && i < u.length - 1) ((v /= 1024), i++);
   return `${v >= 10 || i === 0 ? Math.round(v) : v.toFixed(1)} ${u[i]}`;
 };
 const day = (iso: string) => iso.slice(0, 10);
-const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "device";
+const slug = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "") || "device";
 
 export async function run(argv: string[], io: Io): Promise<number> {
   const f = io.fetch ?? fetch;
@@ -172,9 +180,15 @@ export async function run(argv: string[], io: Io): Promise<number> {
     if (!token) throw new CliError("Set VPN_API_TOKEN to an API token from Settings, API tokens.");
     let res: Response;
     try {
-      res = await f(base + path, { method, headers: { authorization: `Bearer ${token}`, ...(body === undefined ? {} : { "content-type": "application/json" }) }, body: body === undefined ? undefined : JSON.stringify(body) });
+      res = await f(base + path, {
+        method,
+        headers: { authorization: `Bearer ${token}`, ...(body === undefined ? {} : { "content-type": "application/json" }) },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
     } catch (err) {
-      throw new CliError(`Cannot reach ${base}: ${(err as Error).cause instanceof Error ? ((err as Error).cause as Error).message : (err as Error).message}. Set VPN_URL to the address of vpn.`);
+      throw new CliError(
+        `Cannot reach ${base}: ${(err as Error).cause instanceof Error ? ((err as Error).cause as Error).message : (err as Error).message}. Set VPN_URL to the address of vpn.`,
+      );
     }
     if (!res.ok) {
       const p = (await res.json().catch(() => ({}))) as { detail?: string; title?: string };
@@ -209,7 +223,13 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "people": {
         if (!sub) {
           const r = await api<{ people: Person[] }>("GET", "/api/v1/people");
-          print(r, table(["NAME", "EMAIL", "STATUS", "DEVICES", "GROUPS"], r.people.map((p) => [p.name, p.email, p.status, String(p.devices), p.groups.join(", ")])) || "Nobody yet.\n");
+          print(
+            r,
+            table(
+              ["NAME", "EMAIL", "STATUS", "DEVICES", "GROUPS"],
+              r.people.map((p) => [p.name, p.email, p.status, String(p.devices), p.groups.join(", ")]),
+            ) || "Nobody yet.\n",
+          );
         } else if (sub === "add") {
           need(4, "people add <name> <email> [--group <name>]...");
           const p = await api<Person>("POST", "/api/v1/people", { name: args[2], email: args[3], groups: all("group") });
@@ -250,11 +270,16 @@ export async function run(argv: string[], io: Io): Promise<number> {
             (io.writeFile ?? ((path, data) => writeFileSync(path, data, { mode: 0o600, flag: "wx" })))(out, r.ovpn);
           } catch (err) {
             // The device exists now, so its file must not be lost: print it rather than fail.
-            io.err(`Could not write ${out} (${(err as NodeJS.ErrnoException).code ?? (err as Error).message}); here is the file instead. Revoke ${r.device.id} if it is not needed.\n`);
+            io.err(
+              `Could not write ${out} (${(err as NodeJS.ErrnoException).code ?? (err as Error).message}); here is the file instead. Revoke ${r.device.id} if it is not needed.\n`,
+            );
             io.out(r.ovpn);
             return 1;
           }
-          print({ device: r.device, file: out }, `Wrote ${out} for ${p.name}, ${r.device.name} (${r.device.vpnIp}). It holds the device's private key and cannot be downloaded again: send it privately.\n`);
+          print(
+            { device: r.device, file: out },
+            `Wrote ${out} for ${p.name}, ${r.device.name} (${r.device.vpnIp}). It holds the device's private key and cannot be downloaded again: send it privately.\n`,
+          );
         } else if (sub === "revoke") {
           need(3, "devices revoke <device id>");
           const d = await api<Device>("DELETE", `/api/v1/devices/${encodeURIComponent(args[2]!)}`);
@@ -262,7 +287,13 @@ export async function run(argv: string[], io: Io): Promise<number> {
         } else if (sub) {
           const p = await person(sub);
           const r = await api<{ devices: Device[] }>("GET", `/api/v1/people/${p.id}/devices`);
-          print(r, table(["ID", "NAME", "VPN ADDRESS", "STATE"], r.devices.map((d) => [d.id, d.name, d.vpnIp, d.revokedAt ? `revoked ${day(d.revokedAt)}` : `valid until ${day(d.notAfter)}`])) || `${p.name} has no devices.\n`);
+          print(
+            r,
+            table(
+              ["ID", "NAME", "VPN ADDRESS", "STATE"],
+              r.devices.map((d) => [d.id, d.name, d.vpnIp, d.revokedAt ? `revoked ${day(d.revokedAt)}` : `valid until ${day(d.notAfter)}`]),
+            ) || `${p.name} has no devices.\n`,
+          );
         } else throw new CliError("Usage: openasy-vpn devices <person>");
         return 0;
       }
@@ -270,7 +301,13 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "groups": {
         if (!sub) {
           const r = await api<{ groups: Group[] }>("GET", "/api/v1/groups");
-          print(r, table(["NAME", "PEOPLE"], r.groups.map((g) => [g.name, String(g.people)])) || "No groups yet.\n");
+          print(
+            r,
+            table(
+              ["NAME", "PEOPLE"],
+              r.groups.map((g) => [g.name, String(g.people)]),
+            ) || "No groups yet.\n",
+          );
         } else if (sub === "add") {
           need(3, "groups add <name>");
           const g = await api<Group>("POST", "/api/v1/groups", { name: args[2] });
@@ -287,7 +324,11 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "ip-groups": {
         if (!sub) {
           const r = await api<{ ipGroups: IpGroup[] }>("GET", "/api/v1/ip-groups");
-          const rows = r.ipGroups.map((g) => [g.name + (g.fullTunnel ? " (full tunnel)" : ""), g.networks.map((n) => (n.ports === "any" ? n.cidr : `${n.cidr}=${n.ports}`)).join(" "), g.allowedGroups.join(", ") || "nobody"]);
+          const rows = r.ipGroups.map((g) => [
+            g.name + (g.fullTunnel ? " (full tunnel)" : ""),
+            g.networks.map((n) => (n.ports === "any" ? n.cidr : `${n.cidr}=${n.ports}`)).join(" "),
+            g.allowedGroups.join(", ") || "nobody",
+          ]);
           print(r, table(["NAME", "NETWORKS", "WHO MAY REACH THEM"], rows) || "No IP groups yet.\n");
         } else if (sub === "add") {
           need(3, "ip-groups add <name> --network <cidr>[=<ports>]... [--allow <group>]... [--full-tunnel]");
@@ -309,7 +350,16 @@ export async function run(argv: string[], io: Io): Promise<number> {
       case "sessions": {
         if (!sub) {
           const r = await api<{ sessions: Session[] }>("GET", "/api/v1/sessions");
-          const rows = r.sessions.map((s) => [s.personName ?? "?", s.deviceName ?? "?", s.deviceId, s.serverId, s.vpnIp, s.realAddress, s.connectedAt.slice(0, 16).replace("T", " "), `${bytes(s.bytesIn)} / ${bytes(s.bytesOut)}`]);
+          const rows = r.sessions.map((s) => [
+            s.personName ?? "?",
+            s.deviceName ?? "?",
+            s.deviceId,
+            s.serverId,
+            s.vpnIp,
+            s.realAddress,
+            s.connectedAt.slice(0, 16).replace("T", " "),
+            `${bytes(s.bytesIn)} / ${bytes(s.bytesOut)}`,
+          ]);
           print(r, table(["PERSON", "DEVICE", "DEVICE ID", "SERVER", "VPN ADDRESS", "FROM", "SINCE (UTC)", "IN / OUT"], rows) || "Nobody is connected.\n");
         } else if (sub === "end") {
           need(4, "sessions end <server> <device id>");

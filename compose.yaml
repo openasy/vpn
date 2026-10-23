@@ -19,11 +19,11 @@ services:
     image: ghcr.io/openasy/vpn:0.6.0
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8080:8080"   # UI and API; put a TLS proxy in front to reach it from elsewhere
+      - "127.0.0.1:8080:8080" # UI and API; put a TLS proxy in front to reach it from elsewhere
     volumes:
-      - vpn-data:/data   # SQLite database, CA and settings
+      - vpn-data:/data # SQLite database, CA and settings
     secrets:
-      - openasy-kek   # mounted at /run/secrets/openasy-kek
+      - openasy-kek # mounted at /run/secrets/openasy-kek
     environment:
       # The address people open vpn at; with a TLS proxy in front, its https:// URL.
       VPN_PUBLIC_URL: ${VPN_PUBLIC_URL:-http://localhost:8080}
@@ -41,11 +41,11 @@ services:
     devices:
       - /dev/net/tun
     sysctls:
-      net.ipv4.ip_forward: 1   # lets clients reach the networks behind this host
+      net.ipv4.ip_forward: 1 # lets clients reach the networks behind this host
     ports:
       - "1194:1194/udp"
     volumes:
-      - vpn-server-data:/var/lib/openasy-vpn   # its secret: without it, the server must be enrolled again
+      - vpn-server-data:/var/lib/openasy-vpn # its secret: without it, the server must be enrolled again
     environment:
       VPN_URL: http://vpn:8080
       VPN_ENROLL_TOKEN: ${EDGE_1_TOKEN:-}

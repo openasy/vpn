@@ -44,7 +44,9 @@ try {
   process.exit(1);
 }
 if (!kek) {
-  log("error", "no key-encryption key: mount 32 random bytes (openssl rand -hex 32) and set VPN_SECRETS_KEY_FILE if not at the default", { file: secretsKeyFile });
+  log("error", "no key-encryption key: mount 32 random bytes (openssl rand -hex 32) and set VPN_SECRETS_KEY_FILE if not at the default", {
+    file: secretsKeyFile,
+  });
   process.exit(1);
 }
 
@@ -76,7 +78,11 @@ function opensSignInSecrets(key: Buffer): boolean {
 }
 const caKey = db.prepare("SELECT value FROM settings WHERE key = 'ca_key'").get() as { value: string } | undefined;
 if (caKey && !caKey.value.startsWith("v1.") && !opensSignInSecrets(kek)) {
-  log("error", "this key-encryption key does not open the sign-in secrets the earlier version sealed: mount the same openasy-kek as before. Nothing was changed", { file: secretsKeyFile });
+  log(
+    "error",
+    "this key-encryption key does not open the sign-in secrets the earlier version sealed: mount the same openasy-kek as before. Nothing was changed",
+    { file: secretsKeyFile },
+  );
   process.exit(1);
 }
 const vpn = createVpn(db, { network: process.env.VPN_NETWORK ?? "10.8.0.0/24", publicHost: process.env.VPN_PUBLIC_HOST, version, keyring: createKeyring(kek) });
@@ -120,8 +126,10 @@ const server = createServer(
 );
 
 server.listen(port, () => log("info", "vpn started", { version, port, db: dbPath, headless }));
-if (process.env.VPN_SERVER_TOKEN) log("warn", "VPN_SERVER_TOKEN is deprecated: add each server under Servers and start it with its own VPN_ENROLL_TOKEN, then remove VPN_SERVER_TOKEN");
-if (process.env.VPN_ADMIN_TOKEN) log("warn", "VPN_ADMIN_TOKEN is deprecated: it is one shared admin token without an expiry. Create API tokens under Settings and remove it");
+if (process.env.VPN_SERVER_TOKEN)
+  log("warn", "VPN_SERVER_TOKEN is deprecated: add each server under Servers and start it with its own VPN_ENROLL_TOKEN, then remove VPN_SERVER_TOKEN");
+if (process.env.VPN_ADMIN_TOKEN)
+  log("warn", "VPN_ADMIN_TOKEN is deprecated: it is one shared admin token without an expiry. Create API tokens under Settings and remove it");
 if (!publicUrl.startsWith("https://") && !/^http:\/\/(localhost|127\.0\.0\.1)(:|$)/.test(publicUrl)) {
   log("warn", "VPN_PUBLIC_URL is not https: browsers will not keep secure cookies or allow passkeys. Put vpn behind TLS (ADR 0026)", { url: publicUrl });
 }

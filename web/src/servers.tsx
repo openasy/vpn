@@ -45,7 +45,8 @@ function EnrollCommand({ added, version, onDone }: { added: NewServer; version?:
   ghcr.io/openasy/vpn-server:${version ?? t("servers.thisVersion")}`}
         </Code>
         <span>
-          {t("servers.keepVolume")} <code>-p 443:443/tcp -e OPENVPN_PROTO=tcp -e OPENVPN_PORT=443</code> {t("servers.insteadOfUdp")} <code>EDGE_1_TOKEN=…&nbsp;docker compose up -d</code>.
+          {t("servers.keepVolume")} <code>-p 443:443/tcp -e OPENVPN_PROTO=tcp -e OPENVPN_PORT=443</code> {t("servers.insteadOfUdp")}{" "}
+          <code>EDGE_1_TOKEN=…&nbsp;docker compose up -d</code>.
         </span>
         <span>{t("servers.clientConfigs")}</span>
       </span>
@@ -80,17 +81,14 @@ export function ServersPage({ call, version }: { call: Call; version?: string })
   };
   const editAddress = (s: Server) => {
     const next = window.prompt(t("servers.promptAddress", { id: s.id }), s.address ?? "");
-    if (next !== null) void action.run(() => call(`/api/v1/servers/${s.id}`, { method: "PATCH", body: JSON.stringify({ address: next.trim() || null }) }).then(reload));
+    if (next !== null)
+      void action.run(() => call(`/api/v1/servers/${s.id}`, { method: "PATCH", body: JSON.stringify({ address: next.trim() || null }) }).then(reload));
   };
   const enrollAgain = (s: Server) =>
-    window.confirm(
-      s.legacy
-        ? t("servers.confirmEnrolLegacy", { id: s.id })
-        : t("servers.confirmEnrolAgain", { id: s.id }),
-    ) && void action.run(async () => (setAdded(await call<NewServer>(`/api/v1/servers/${s.id}/enroll-token`, { method: "POST" })), reload()));
+    window.confirm(s.legacy ? t("servers.confirmEnrolLegacy", { id: s.id }) : t("servers.confirmEnrolAgain", { id: s.id })) &&
+    void action.run(async () => (setAdded(await call<NewServer>(`/api/v1/servers/${s.id}/enroll-token`, { method: "POST" })), reload()));
   const remove = (s: Server) =>
-    window.confirm(t("servers.confirmRemove", { id: s.id })) &&
-    void action.run(() => call(`/api/v1/servers/${s.id}`, { method: "DELETE" }).then(reload));
+    window.confirm(t("servers.confirmRemove", { id: s.id })) && void action.run(() => call(`/api/v1/servers/${s.id}`, { method: "DELETE" }).then(reload));
 
   const columns: Column<Server>[] = [
     {
@@ -109,11 +107,23 @@ export function ServersPage({ call, version }: { call: Call; version?: string })
       sortValue: (s) => s.id,
     },
     { id: "state", header: t("servers.state"), width: "170px", cell: (s) => <StatusBadge tone={state(t, s).tone}>{state(t, s).label}</StatusBadge> },
-    { id: "address", header: t("common.address"), mono: true, cell: (s) => s.address ?? <span title="VPN_PUBLIC_HOST">{t("servers.default")}</span>, sortValue: (s) => s.address ?? "" },
+    {
+      id: "address",
+      header: t("common.address"),
+      mono: true,
+      cell: (s) => s.address ?? <span title="VPN_PUBLIC_HOST">{t("servers.default")}</span>,
+      sortValue: (s) => s.address ?? "",
+    },
     { id: "listen", header: t("servers.listensOn"), width: "110px", mono: true, cell: (s) => s.listen ?? (s.lastSeen ? "udp/1194" : "–") },
     { id: "version", header: t("servers.version"), width: "90px", mono: true, cell: (s) => s.version ?? "–" },
     { id: "config", header: t("servers.config"), width: "170px", mono: true, cell: (s) => s.configVersion ?? t("servers.notApplied") },
-    { id: "seen", header: t("servers.lastHeartbeat"), width: "130px", cell: (s) => <span title={s.lastSeen ? new Date(s.lastSeen).toLocaleString() : undefined}>{ago(t, s.lastSeen)}</span>, sortValue: (s) => s.lastSeen ?? "" },
+    {
+      id: "seen",
+      header: t("servers.lastHeartbeat"),
+      width: "130px",
+      cell: (s) => <span title={s.lastSeen ? new Date(s.lastSeen).toLocaleString() : undefined}>{ago(t, s.lastSeen)}</span>,
+      sortValue: (s) => s.lastSeen ?? "",
+    },
     ...(can("admin")
       ? [
           {

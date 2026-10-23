@@ -19,7 +19,13 @@ function GroupPicker({ groups, value, onChange, disabled }: { groups: Group[]; v
   return (
     <div className="flex flex-wrap gap-3">
       {groups.map((g) => (
-        <Checkbox key={g.id} label={g.name} checked={value.includes(g.name)} disabled={disabled} onChange={(e) => onChange(e.target.checked ? [...value, g.name] : value.filter((n) => n !== g.name))} />
+        <Checkbox
+          key={g.id}
+          label={g.name}
+          checked={value.includes(g.name)}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.checked ? [...value, g.name] : value.filter((n) => n !== g.name))}
+        />
       ))}
     </div>
   );
@@ -35,7 +41,20 @@ export function PeoplePage({ call }: { call: Call }) {
     { id: "name", header: t("common.name"), cell: (p) => <a href={`/people/${p.id}`}>{p.name}</a>, sortValue: (p) => p.name },
     { id: "email", header: t("common.email"), cell: (p) => p.email, sortValue: (p) => p.email },
     { id: "status", header: t("common.status"), width: "120px", cell: (p) => <PersonStatus status={p.status} />, sortValue: (p) => p.status },
-    { id: "groups", header: t("common.groups"), cell: (p) => (p.groups.length ? <span className="flex flex-wrap gap-1">{p.groups.map((g) => <Badge key={g}>{g}</Badge>)}</span> : "–") },
+    {
+      id: "groups",
+      header: t("common.groups"),
+      cell: (p) =>
+        p.groups.length ? (
+          <span className="flex flex-wrap gap-1">
+            {p.groups.map((g) => (
+              <Badge key={g}>{g}</Badge>
+            ))}
+          </span>
+        ) : (
+          "–"
+        ),
+    },
     { id: "devices", header: t("common.devices"), width: "90px", align: "right", mono: true, cell: (p) => p.devices, sortValue: (p) => p.devices },
   ];
   return (
@@ -74,7 +93,10 @@ function AddPerson({ call, groups, onDone }: { call: Call; groups: Group[]; onDo
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     let created: Person | undefined;
-    if (await action.run(async () => (created = await call<Person>("/api/v1/people", { method: "POST", body: JSON.stringify({ name, email, groups: chosen }) })))) onDone(created);
+    if (
+      await action.run(async () => (created = await call<Person>("/api/v1/people", { method: "POST", body: JSON.stringify({ name, email, groups: chosen }) })))
+    )
+      onDone(created);
   };
   return (
     <Dialog
@@ -117,7 +139,8 @@ export function PersonPage({ call, id }: { call: Call; id: string }) {
   useEffect(() => setChosen(p?.groups ?? []), [p]);
   if (person.error) return <EmptyState title={t("people.notFound")}>{person.error}</EmptyState>;
   if (!p) return null;
-  const change = (body: object) => action.run(() => call<Person>(`/api/v1/people/${id}`, { method: "PATCH", body: JSON.stringify(body) })).then(() => person.reload());
+  const change = (body: object) =>
+    action.run(() => call<Person>(`/api/v1/people/${id}`, { method: "PATCH", body: JSON.stringify(body) })).then(() => person.reload());
   const remove = () =>
     window.confirm(t("people.confirmRemove", { name: p.name })) &&
     void action.run(() => call(`/api/v1/people/${id}`, { method: "DELETE" })).then((ok) => ok && navigate("/people"));
@@ -194,8 +217,7 @@ function Devices({ call, person, devices, onChange }: { call: Call; person: Pers
     if (ok) onChange();
   };
   const revoke = (d: Device) =>
-    window.confirm(t("devices.confirmRevoke", { name: d.name })) &&
-    void action.run(() => call(`/api/v1/devices/${d.id}`, { method: "DELETE" })).then(onChange);
+    window.confirm(t("devices.confirmRevoke", { name: d.name })) && void action.run(() => call(`/api/v1/devices/${d.id}`, { method: "DELETE" })).then(onChange);
   const columns: Column<Device>[] = [
     { id: "name", header: t("common.device"), cell: (d) => d.name, sortValue: (d) => d.name },
     { id: "ip", header: t("common.vpnAddress"), width: "120px", mono: true, cell: (d) => d.vpnIp },
@@ -291,9 +313,7 @@ function Devices({ call, person, devices, onChange }: { call: Call; person: Pers
           </Dialog>
         )}
         {devices && devices.length === 0 ? (
-          <EmptyState title={t("devices.noneYet")}>
-            {t("devices.noneYetBody")}
-          </EmptyState>
+          <EmptyState title={t("devices.noneYet")}>{t("devices.noneYetBody")}</EmptyState>
         ) : (
           <List label={t("devices.of", { name: person.name })} rows={devices} columns={columns} empty={t("devices.none")} getRowId={(d) => d.id} />
         )}

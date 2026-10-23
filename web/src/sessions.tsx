@@ -15,13 +15,34 @@ export function SessionTable({ call, personId }: { call: Call; personId?: string
   const columns: Column<Session>[] = [
     ...(personId
       ? []
-      : [{ id: "person", header: t("sessions.person"), cell: (s: Session) => (s.personId ? <a href={`/people/${s.personId}`}>{s.personName}</a> : t("sessions.unknownDevice")), sortValue: (s: Session) => s.personName ?? "" } satisfies Column<Session>]),
+      : [
+          {
+            id: "person",
+            header: t("sessions.person"),
+            cell: (s: Session) => (s.personId ? <a href={`/people/${s.personId}`}>{s.personName}</a> : t("sessions.unknownDevice")),
+            sortValue: (s: Session) => s.personName ?? "",
+          } satisfies Column<Session>,
+        ]),
     { id: "device", header: t("common.device"), cell: (s) => s.deviceName ?? s.deviceId, sortValue: (s) => s.deviceName ?? "" },
     { id: "vpnIp", header: t("common.vpnAddress"), width: "120px", mono: true, cell: (s) => s.vpnIp },
     { id: "from", header: t("sessions.from"), width: "170px", mono: true, cell: (s) => s.realAddress },
     { id: "server", header: t("common.server"), width: "120px", cell: (s) => s.serverId },
-    { id: "since", header: t("sessions.connected"), width: "110px", cell: (s) => <span title={new Date(s.connectedAt).toLocaleString()}>{ago(t, s.connectedAt)}</span>, sortValue: (s) => s.connectedAt },
-    { id: "traffic", header: t("sessions.traffic"), width: "140px", align: "right", mono: true, cell: (s) => `${bytes(s.bytesIn)} / ${bytes(s.bytesOut)}`, sortValue: (s) => s.bytesIn + s.bytesOut },
+    {
+      id: "since",
+      header: t("sessions.connected"),
+      width: "110px",
+      cell: (s) => <span title={new Date(s.connectedAt).toLocaleString()}>{ago(t, s.connectedAt)}</span>,
+      sortValue: (s) => s.connectedAt,
+    },
+    {
+      id: "traffic",
+      header: t("sessions.traffic"),
+      width: "140px",
+      align: "right",
+      mono: true,
+      cell: (s) => `${bytes(s.bytesIn)} / ${bytes(s.bytesOut)}`,
+      sortValue: (s) => s.bytesIn + s.bytesOut,
+    },
     ...(can("editor")
       ? [
           {
@@ -33,7 +54,11 @@ export function SessionTable({ call, personId }: { call: Call; personId?: string
                 size="xs"
                 variant="ghost"
                 icon={<Unplug />}
-                onClick={() => void end.run(() => call(`/api/v1/sessions/${encodeURIComponent(s.serverId)}/${encodeURIComponent(s.deviceId)}`, { method: "DELETE" })).then(reload)}
+                onClick={() =>
+                  void end
+                    .run(() => call(`/api/v1/sessions/${encodeURIComponent(s.serverId)}/${encodeURIComponent(s.deviceId)}`, { method: "DELETE" }))
+                    .then(reload)
+                }
               >
                 {t("sessions.end")}
               </Button>

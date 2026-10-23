@@ -43,7 +43,16 @@ describe("openasy-vpn", () => {
 
   it("gives someone access from start to end", async () => {
     expect((await cli(["groups", "add", "Backend engineers"])).out).toBe("Added the group Backend engineers.\n");
-    const ig = await cli(["ip-groups", "add", "Production databases", "--network", "172.16.20.0/24=tcp/5432,6432", "--network=10.1.0.0/16", "--allow", "Backend engineers"]);
+    const ig = await cli([
+      "ip-groups",
+      "add",
+      "Production databases",
+      "--network",
+      "172.16.20.0/24=tcp/5432,6432",
+      "--network=10.1.0.0/16",
+      "--allow",
+      "Backend engineers",
+    ]);
     expect(ig.code).toBe(0);
     expect((await cli(["ip-groups"])).out).toMatch(/Production databases\s+172\.16\.20\.0\/24=tcp\/5432,6432 10\.1\.0\.0\/16\s+Backend engineers/);
 
@@ -87,7 +96,10 @@ describe("openasy-vpn", () => {
     const devices = JSON.parse((await cli(["devices", "dana@example.com", "--json"])).out) as { devices: Array<{ id: string; vpnIp: string }> };
     const d = devices.devices[0]!;
     const heartbeat = (sessions: unknown[]) =>
-      app.agent("/api/v1/servers/heartbeat", { method: "POST", body: JSON.stringify({ id: "edge-1", version: "1.2.3", listen: "udp/1194", openvpnRunning: true, sessions }) });
+      app.agent("/api/v1/servers/heartbeat", {
+        method: "POST",
+        body: JSON.stringify({ id: "edge-1", version: "1.2.3", listen: "udp/1194", openvpnRunning: true, sessions }),
+      });
     const live = [{ cn: d.id, realAddress: "203.0.113.7:51820", vpnIp: d.vpnIp, bytesIn: 2048, bytesOut: 10, connectedAt: new Date().toISOString() }];
     await heartbeat(live);
     expect((await cli(["servers"])).out).toMatch(/edge-1 \(legacy\)\s+online\s+default\s+udp\/1194\s+1\.2\.3\s+running/);

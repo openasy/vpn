@@ -58,9 +58,11 @@ function send(res: ServerResponse, status: number, body: string | Buffer, type =
   res.end(body);
 }
 
-const json = (res: ServerResponse, status: number, data: unknown, headers?: Record<string, string>) => send(res, status, JSON.stringify(data), "application/json", headers);
+const json = (res: ServerResponse, status: number, data: unknown, headers?: Record<string, string>) =>
+  send(res, status, JSON.stringify(data), "application/json", headers);
 
-type ProblemCode = "invalid-token" | "invalid-json" | "invalid-body" | "version-mismatch" | "not-found" | "conflict" | "not-configured" | "forbidden" | "internal-error";
+type ProblemCode =
+  "invalid-token" | "invalid-json" | "invalid-body" | "version-mismatch" | "not-found" | "conflict" | "not-configured" | "forbidden" | "internal-error";
 
 const TITLES: Record<ProblemCode, string> = {
   "invalid-token": "Invalid token",
@@ -168,7 +170,14 @@ function parseSessions(value: unknown): ReportedSession[] {
     ) {
       throw new HttpProblem(422, "invalid-body", "Each session needs { cn, realAddress, vpnIp, bytesIn, bytesOut, connectedAt }.");
     }
-    return { cn: x.cn, realAddress: x.realAddress, vpnIp: x.vpnIp, bytesIn: x.bytesIn!, bytesOut: x.bytesOut!, connectedAt: new Date(x.connectedAt).toISOString() };
+    return {
+      cn: x.cn,
+      realAddress: x.realAddress,
+      vpnIp: x.vpnIp,
+      bytesIn: x.bytesIn!,
+      bytesOut: x.bytesOut!,
+      connectedAt: new Date(x.connectedAt).toISOString(),
+    };
   });
 }
 
@@ -202,7 +211,13 @@ export function createApp({ db, vpn, version, auth, serverToken, adminToken, web
       bodyLimit: 1024 * 1024,
       handle: async ({ res, body, server }) => {
         const raw = await body();
-        const { id, version: agentVersion, listen, openvpnRunning, configVersion } = raw as { id?: unknown; version?: unknown; listen?: unknown; openvpnRunning?: unknown; configVersion?: unknown };
+        const {
+          id,
+          version: agentVersion,
+          listen,
+          openvpnRunning,
+          configVersion,
+        } = raw as { id?: unknown; version?: unknown; listen?: unknown; openvpnRunning?: unknown; configVersion?: unknown };
         if (
           typeof id !== "string" ||
           !SERVER_ID.test(id) ||
@@ -214,7 +229,12 @@ export function createApp({ db, vpn, version, auth, serverToken, adminToken, web
           throw new HttpProblem(422, "invalid-body", "Expected { id, version, listen?, openvpnRunning, configVersion? }.");
         }
         checkServer(server, id);
-        const report = { version: agentVersion, listen: (listen as string | null | undefined) ?? null, openvpnRunning, configVersion: (configVersion as string | null | undefined) ?? null };
+        const report = {
+          version: agentVersion,
+          listen: (listen as string | null | undefined) ?? null,
+          openvpnRunning,
+          configVersion: (configVersion as string | null | undefined) ?? null,
+        };
         // ADR 0019: vpn-server always has the same version as vpn. The server is recorded, so Servers shows why.
         if (agentVersion !== version) {
           vpn.recordHeartbeat(id, report, server === null);
@@ -265,7 +285,12 @@ export function createApp({ db, vpn, version, auth, serverToken, adminToken, web
     { method: "PATCH", path: "/api/v1/people/:id", auth: "editor", handle: async ({ params, body }) => vpn.updatePerson(params[0]!, await body()) },
     { method: "DELETE", path: "/api/v1/people/:id", auth: "admin", handle: ({ res, params }) => (vpn.deletePerson(params[0]!), noContent(res)) },
     { method: "GET", path: "/api/v1/people/:id/devices", auth: "viewer", handle: ({ params }) => ({ devices: vpn.listDevices(params[0]!) }) },
-    { method: "POST", path: "/api/v1/people/:id/devices", auth: "editor", handle: async ({ res, params, body }) => created(res, await vpn.createDevice(params[0]!, await body())) },
+    {
+      method: "POST",
+      path: "/api/v1/people/:id/devices",
+      auth: "editor",
+      handle: async ({ res, params, body }) => created(res, await vpn.createDevice(params[0]!, await body())),
+    },
     { method: "DELETE", path: "/api/v1/devices/:id", auth: "editor", handle: ({ params }) => vpn.revokeDevice(params[0]!) },
 
     // Groups and IP groups.
@@ -304,7 +329,11 @@ export function createApp({ db, vpn, version, auth, serverToken, adminToken, web
   /** A server speaks only for itself; VPN_SERVER_TOKEN only for servers that never enrolled. */
   function checkServer(server: string | null, id: string) {
     if (server === null ? vpn.legacyAllowed(id) : server === id) return;
-    throw new HttpProblem(403, "forbidden", server === null ? `${id} has enrolled: it must use its own secret, not VPN_SERVER_TOKEN.` : `This secret belongs to ${server}, not ${id}.`);
+    throw new HttpProblem(
+      403,
+      "forbidden",
+      server === null ? `${id} has enrolled: it must use its own secret, not VPN_SERVER_TOKEN.` : `This secret belongs to ${server}, not ${id}.`,
+    );
   }
 
   async function route(req: IncomingMessage, res: ServerResponse): Promise<string> {

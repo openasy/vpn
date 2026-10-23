@@ -77,9 +77,13 @@ describe("server heartbeat", () => {
 describe("server enrolment", () => {
   type Added = { server: { id: string; status: string; address: string | null }; enrollToken: string; enrollExpiresAt: string };
   const add = async (body: unknown) => app.admin("/api/v1/servers", { method: "POST", body: JSON.stringify(body) });
-  const enroll = (token: string) => fetch(`${base}/api/v1/servers/enroll`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token }) });
+  const enroll = (token: string) =>
+    fetch(`${base}/api/v1/servers/enroll`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token }) });
   const config = (id: string, token: string) => fetch(`${base}/api/v1/servers/${id}/config`, { headers: { authorization: `Bearer ${token}` } });
-  const status = async (id: string) => ((await (await app.admin("/api/v1/servers")).json()) as { servers: Array<{ id: string; status: string; legacy: boolean }> }).servers.find((s) => s.id === id);
+  const status = async (id: string) =>
+    ((await (await app.admin("/api/v1/servers")).json()) as { servers: Array<{ id: string; status: string; legacy: boolean }> }).servers.find(
+      (s) => s.id === id,
+    );
 
   it("adds a server that waits for its enrolment token", async () => {
     const res = await add({ id: "fra-1", address: "FRA.vpn.example.com" });

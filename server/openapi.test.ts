@@ -45,7 +45,9 @@ async function call(method: string, path: string, init: RequestInit = {}, concre
   // A response is either inline or a $ref to components/responses; build the JSON pointer to its schema either way.
   const shared = declared!.$ref?.split("/").pop();
   const response = shared ? spec.components.responses[shared]! : declared!;
-  const at = shared ? `openapi#/components/responses/${shared}` : `openapi#/paths/${path.replaceAll("/", "~1")}/${method.toLowerCase()}/responses/${res.status}`;
+  const at = shared
+    ? `openapi#/components/responses/${shared}`
+    : `openapi#/paths/${path.replaceAll("/", "~1")}/${method.toLowerCase()}/responses/${res.status}`;
 
   if (!response.content) {
     expect(res.headers.get("content-length") ?? "0", `${method} ${path} ${res.status} should have no body`).toBe("0");
@@ -61,8 +63,14 @@ async function call(method: string, path: string, init: RequestInit = {}, concre
   return { res, body };
 }
 
-const json = (body: unknown, token = SERVER_TOKEN) => ({ headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body) });
-const admin = (body?: unknown) => ({ headers: { authorization: `Bearer ${ADMIN_TOKEN}`, "content-type": "application/json" }, ...(body !== undefined && { body: JSON.stringify(body) }) });
+const json = (body: unknown, token = SERVER_TOKEN) => ({
+  headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+  body: JSON.stringify(body),
+});
+const admin = (body?: unknown) => ({
+  headers: { authorization: `Bearer ${ADMIN_TOKEN}`, "content-type": "application/json" },
+  ...(body !== undefined && { body: JSON.stringify(body) }),
+});
 
 describe("openapi.json", () => {
   it("has the version of this release", () => {
@@ -109,7 +117,12 @@ describe("responses match openapi.json", () => {
     expect((body as { servers: unknown[] }).servers).toHaveLength(1);
     await call("GET", "/api/v1/servers", {});
     const { res } = await call("GET", "/api/v1/servers/{id}/config", json(undefined), "/api/v1/servers/edge-1/config");
-    await call("GET", "/api/v1/servers/{id}/config", { headers: { ...json(undefined).headers, "if-none-match": res.headers.get("etag")! } }, "/api/v1/servers/edge-1/config");
+    await call(
+      "GET",
+      "/api/v1/servers/{id}/config",
+      { headers: { ...json(undefined).headers, "if-none-match": res.headers.get("etag")! } },
+      "/api/v1/servers/edge-1/config",
+    );
     await call("GET", "/api/v1/servers/{id}/config", json(undefined), "/api/v1/servers/Bad_Id/config");
     await call("GET", "/api/v1/servers/{id}/config", {}, "/api/v1/servers/edge-1/config");
   });
@@ -145,7 +158,13 @@ describe("responses match openapi.json", () => {
     await call("POST", "/api/v1/groups", { ...admin(), body: "nope" });
     await call("GET", "/api/v1/groups", admin());
 
-    const ip = (await call("POST", "/api/v1/ip-groups", admin({ name: "Kubernetes API", networks: [{ cidr: "172.16.0.10/32", ports: "tcp/6443" }], allowedGroups: ["SRE on-call"] }))).body as { id: string };
+    const ip = (
+      await call(
+        "POST",
+        "/api/v1/ip-groups",
+        admin({ name: "Kubernetes API", networks: [{ cidr: "172.16.0.10/32", ports: "tcp/6443" }], allowedGroups: ["SRE on-call"] }),
+      )
+    ).body as { id: string };
     await call("POST", "/api/v1/ip-groups", admin({ name: "Kubernetes API" }));
     await call("POST", "/api/v1/ip-groups", admin({ name: "x", networks: [{ cidr: "nope" }] }));
     await call("POST", "/api/v1/ip-groups", { ...admin(), body: "nope" });
@@ -157,7 +176,9 @@ describe("responses match openapi.json", () => {
     await call("PATCH", "/api/v1/ip-groups/{id}", { ...admin(), body: "nope" }, `/api/v1/ip-groups/${ip.id}`);
     await call("PATCH", "/api/v1/ip-groups/{id}", admin({}), "/api/v1/ip-groups/missing");
 
-    const person = (await call("POST", "/api/v1/people", admin({ name: "Sarah Chen", email: "sarah@example.com", groups: ["SRE on-call"] }))).body as { id: string };
+    const person = (await call("POST", "/api/v1/people", admin({ name: "Sarah Chen", email: "sarah@example.com", groups: ["SRE on-call"] }))).body as {
+      id: string;
+    };
     await call("POST", "/api/v1/people", admin({ name: "Sarah", email: "sarah@example.com" }));
     await call("POST", "/api/v1/people", admin({ name: "No email" }));
     await call("POST", "/api/v1/people", { ...admin(), body: "nope" });
@@ -169,7 +190,9 @@ describe("responses match openapi.json", () => {
     await call("PATCH", "/api/v1/people/{id}", { ...admin(), body: "nope" }, `/api/v1/people/${person.id}`);
     await call("PATCH", "/api/v1/people/{id}", admin({}), "/api/v1/people/missing");
 
-    const device = (await call("POST", "/api/v1/people/{id}/devices", admin({ name: "Laptop" }), `/api/v1/people/${person.id}/devices`)).body as { device: { id: string } };
+    const device = (await call("POST", "/api/v1/people/{id}/devices", admin({ name: "Laptop" }), `/api/v1/people/${person.id}/devices`)).body as {
+      device: { id: string };
+    };
     await call("POST", "/api/v1/people/{id}/devices", admin({}), `/api/v1/people/${person.id}/devices`);
     await call("POST", "/api/v1/people/{id}/devices", { ...admin(), body: "nope" }, `/api/v1/people/${person.id}/devices`);
     await call("POST", "/api/v1/people/{id}/devices", admin({ name: "Laptop" }), "/api/v1/people/missing/devices");
@@ -188,12 +211,22 @@ describe("responses match openapi.json", () => {
     await call("DELETE", "/api/v1/groups/{id}", admin(), "/api/v1/groups/missing");
 
     // Every management endpoint answers 401 without the token; check one per method.
-    for (const [m, p] of [["GET", "/api/v1/people"], ["POST", "/api/v1/people"], ["GET", "/api/v1/groups"], ["POST", "/api/v1/groups"], ["GET", "/api/v1/ip-groups"], ["POST", "/api/v1/ip-groups"]] as const) await call(m, p, { method: m });
+    for (const [m, p] of [
+      ["GET", "/api/v1/people"],
+      ["POST", "/api/v1/people"],
+      ["GET", "/api/v1/groups"],
+      ["POST", "/api/v1/groups"],
+      ["GET", "/api/v1/ip-groups"],
+      ["POST", "/api/v1/ip-groups"],
+    ] as const)
+      await call(m, p, { method: m });
   });
 
   it("sessions", async () => {
     const person = (await call("POST", "/api/v1/people", admin({ name: "Zoe Adams", email: "zoe@example.com" }))).body as { id: string };
-    const device = ((await call("POST", "/api/v1/people/{id}/devices", admin({ name: "Phone" }), `/api/v1/people/${person.id}/devices`)).body as { device: { id: string } }).device;
+    const device = (
+      (await call("POST", "/api/v1/people/{id}/devices", admin({ name: "Phone" }), `/api/v1/people/${person.id}/devices`)).body as { device: { id: string } }
+    ).device;
     const session = { cn: device.id, realAddress: "198.51.100.7:1194", vpnIp: "10.8.0.9", bytesIn: 1, bytesOut: 2, connectedAt: new Date().toISOString() };
     await call("POST", "/api/v1/servers/heartbeat", json({ id: "edge-1", version, listen: "udp/1194", openvpnRunning: true, sessions: [session] }));
     expect(((await call("GET", "/api/v1/sessions", admin())).body as { sessions: unknown[] }).sessions).toHaveLength(1);

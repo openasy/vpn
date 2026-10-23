@@ -45,7 +45,10 @@ function Groups({ call, groups, onChange }: { call: Call; groups: Group[] | unde
                 size="xs"
                 variant="ghost"
                 icon={<Trash2 />}
-                onClick={() => window.confirm(t("access.confirmRemoveGroup", { name: g.name, count: g.people })) && void action.run(() => call(`/api/v1/groups/${g.id}`, { method: "DELETE" })).then(onChange)}
+                onClick={() =>
+                  window.confirm(t("access.confirmRemoveGroup", { name: g.name, count: g.people })) &&
+                  void action.run(() => call(`/api/v1/groups/${g.id}`, { method: "DELETE" })).then(onChange)
+                }
               >
                 {t("common.remove")}
               </Button>
@@ -102,7 +105,17 @@ function IpGroups({ call, ipGroups, groups, onChange }: { call: Call; ipGroups: 
   const [editing, setEditing] = useState<IpGroup | "new">();
   const action = useAction();
   const columns: Column<IpGroup>[] = [
-    { id: "name", header: t("access.ipGroup"), cell: (g) => <span className="flex flex-wrap items-center gap-1">{g.name}{g.fullTunnel && <Badge tone="info">{t("access.fullTunnel")}</Badge>}</span>, sortValue: (g) => g.name },
+    {
+      id: "name",
+      header: t("access.ipGroup"),
+      cell: (g) => (
+        <span className="flex flex-wrap items-center gap-1">
+          {g.name}
+          {g.fullTunnel && <Badge tone="info">{t("access.fullTunnel")}</Badge>}
+        </span>
+      ),
+      sortValue: (g) => g.name,
+    },
     {
       id: "networks",
       header: t("access.networksAndPorts"),
@@ -119,7 +132,20 @@ function IpGroups({ call, ipGroups, groups, onChange }: { call: Call; ipGroups: 
           "–"
         ),
     },
-    { id: "allowed", header: t("access.whoMayReach"), cell: (g) => (g.allowedGroups.length ? <span className="flex flex-wrap gap-1">{g.allowedGroups.map((n) => <Badge key={n}>{n}</Badge>)}</span> : t("access.nobodyYet")) },
+    {
+      id: "allowed",
+      header: t("access.whoMayReach"),
+      cell: (g) =>
+        g.allowedGroups.length ? (
+          <span className="flex flex-wrap gap-1">
+            {g.allowedGroups.map((n) => (
+              <Badge key={n}>{n}</Badge>
+            ))}
+          </span>
+        ) : (
+          t("access.nobodyYet")
+        ),
+    },
     ...(can("admin")
       ? [
           {
@@ -135,7 +161,10 @@ function IpGroups({ call, ipGroups, groups, onChange }: { call: Call; ipGroups: 
                   size="xs"
                   variant="ghost"
                   icon={<Trash2 />}
-                  onClick={() => window.confirm(t("access.confirmRemoveIpGroup", { name: g.name })) && void action.run(() => call(`/api/v1/ip-groups/${g.id}`, { method: "DELETE" })).then(onChange)}
+                  onClick={() =>
+                    window.confirm(t("access.confirmRemoveIpGroup", { name: g.name })) &&
+                    void action.run(() => call(`/api/v1/ip-groups/${g.id}`, { method: "DELETE" })).then(onChange)
+                  }
                 >
                   {t("common.remove")}
                 </Button>
@@ -147,7 +176,15 @@ function IpGroups({ call, ipGroups, groups, onChange }: { call: Call; ipGroups: 
   ];
   return (
     <>
-      {editing && <IpGroupEditor key={editing === "new" ? "new" : editing.id} call={call} ipGroup={editing === "new" ? undefined : editing} groups={groups} onDone={(changed) => (setEditing(undefined), changed && onChange())} />}
+      {editing && (
+        <IpGroupEditor
+          key={editing === "new" ? "new" : editing.id}
+          call={call}
+          ipGroup={editing === "new" ? undefined : editing}
+          groups={groups}
+          onDone={(changed) => (setEditing(undefined), changed && onChange())}
+        />
+      )}
       <Panel
         title={t("access.ipGroups")}
         description={t("access.ipGroupsBody")}
@@ -179,7 +216,9 @@ function IpGroupEditor({ call, ipGroup, groups, onDone }: { call: Call; ipGroup?
     e.preventDefault();
     const body = { fullTunnel, networks: networks.filter((n) => n.cidr.trim()), allowedGroups: allowed };
     const ok = await action.run(() =>
-      ipGroup ? call(`/api/v1/ip-groups/${ipGroup.id}`, { method: "PATCH", body: JSON.stringify(body) }) : call("/api/v1/ip-groups", { method: "POST", body: JSON.stringify({ name, ...body }) }),
+      ipGroup
+        ? call(`/api/v1/ip-groups/${ipGroup.id}`, { method: "PATCH", body: JSON.stringify(body) })
+        : call("/api/v1/ip-groups", { method: "POST", body: JSON.stringify({ name, ...body }) }),
     );
     if (ok) onDone(true);
   };
@@ -209,9 +248,22 @@ function IpGroupEditor({ call, ipGroup, groups, onDone }: { call: Call; ipGroup?
         {networks.map((n, i) => (
           <div key={i} className="flex flex-wrap items-end gap-2">
             <TextField label={t("access.network")} mono value={n.cidr} onChange={(e) => set(i, { cidr: e.target.value })} placeholder="172.16.20.0/24" />
-            <TextField label={t("access.ports")} mono value={n.ports} onChange={(e) => set(i, { ports: e.target.value })} placeholder={t("access.portsPlaceholder")} />
+            <TextField
+              label={t("access.ports")}
+              mono
+              value={n.ports}
+              onChange={(e) => set(i, { ports: e.target.value })}
+              placeholder={t("access.portsPlaceholder")}
+            />
             <TextField label={t("access.note")} value={n.note} onChange={(e) => set(i, { note: e.target.value })} placeholder={t("access.notePlaceholder")} />
-            <Button type="button" size="sm" variant="ghost" icon={<X />} aria-label={t("access.removeNetwork", { n: i + 1 })} onClick={() => setNetworks(networks.filter((_, j) => j !== i))}>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              icon={<X />}
+              aria-label={t("access.removeNetwork", { n: i + 1 })}
+              onClick={() => setNetworks(networks.filter((_, j) => j !== i))}
+            >
               {t("common.remove")}
             </Button>
           </div>
@@ -228,7 +280,12 @@ function IpGroupEditor({ call, ipGroup, groups, onDone }: { call: Call; ipGroup?
         {groups.length ? (
           <div className="flex flex-wrap gap-3">
             {groups.map((g) => (
-              <Checkbox key={g.id} label={g.name} checked={allowed.includes(g.name)} onChange={(e) => setAllowed(e.target.checked ? [...allowed, g.name] : allowed.filter((x) => x !== g.name))} />
+              <Checkbox
+                key={g.id}
+                label={g.name}
+                checked={allowed.includes(g.name)}
+                onChange={(e) => setAllowed(e.target.checked ? [...allowed, g.name] : allowed.filter((x) => x !== g.name))}
+              />
             ))}
           </div>
         ) : (

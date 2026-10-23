@@ -1,4 +1,17 @@
-import { AppShell, BrandProvider, Button, EmptyState, navigate, PageHeader, PRODUCT_IDS, toLocale, useLocalePreference, usePath, type ProductId, useThemePreference } from "@openasy/ui";
+import {
+  AppShell,
+  BrandProvider,
+  Button,
+  EmptyState,
+  navigate,
+  PageHeader,
+  PRODUCT_IDS,
+  toLocale,
+  useLocalePreference,
+  usePath,
+  type ProductId,
+  useThemePreference,
+} from "@openasy/ui";
 import { AccountSettings, AuthGate, MembersSettings, SignInSettings, TokensSettings, useAuth } from "@openasy/auth/react";
 import { Activity, KeyRound, LogIn, LogOut, Network, Server as ServerIcon, UserRound, Users, UsersRound } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -105,7 +118,15 @@ function Product() {
               )
             }
           />
-          {settings === "account" ? <AccountSettings /> : settings === "members" ? <MembersSettings /> : settings === "signin" ? <SignInSettings /> : <TokensSettings />}
+          {settings === "account" ? (
+            <AccountSettings />
+          ) : settings === "members" ? (
+            <MembersSettings />
+          ) : settings === "signin" ? (
+            <SignInSettings />
+          ) : (
+            <TokensSettings />
+          )}
         </>
       )}
     </AppShell>

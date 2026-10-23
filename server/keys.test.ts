@@ -24,8 +24,12 @@ describe("keys at rest", () => {
     const again = await app.agent("/api/v1/servers/edge-1/config");
     expect(((await again.json()) as { key: string }).key).toBe(config.key);
 
-    const person = (await (await app.admin("/api/v1/people", { method: "POST", body: JSON.stringify({ name: "Dana Kim", email: "dana@example.com" }) })).json()) as { id: string };
-    const { ovpn } = (await (await app.admin(`/api/v1/people/${person.id}/devices`, { method: "POST", body: JSON.stringify({ name: "Laptop" }) })).json()) as { ovpn: string };
+    const person = (await (
+      await app.admin("/api/v1/people", { method: "POST", body: JSON.stringify({ name: "Dana Kim", email: "dana@example.com" }) })
+    ).json()) as { id: string };
+    const { ovpn } = (await (await app.admin(`/api/v1/people/${person.id}/devices`, { method: "POST", body: JSON.stringify({ name: "Laptop" }) })).json()) as {
+      ovpn: string;
+    };
     expect(ovpn).toContain(`<tls-crypt>\n${config.tlsCrypt.trim()}\n</tls-crypt>`);
 
     const dump = JSON.stringify(app.db.prepare("SELECT * FROM settings").all()) + JSON.stringify(app.db.prepare("SELECT * FROM server_certs").all());
@@ -39,7 +43,9 @@ describe("keys at rest", () => {
     const ca = await createCa();
     const tls = tlsCryptKey();
     db.prepare("INSERT INTO settings (key, value) VALUES ('ca_cert', ?), ('ca_key', ?), ('tls_crypt', ?)").run(ca.cert, ca.key, tls);
-    db.prepare("INSERT INTO server_certs (server_id, serial, cert, key, not_after) VALUES ('edge-1', '01', 'cert', '-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----\n', '2030-01-01T00:00:00.000Z')").run();
+    db.prepare(
+      "INSERT INTO server_certs (server_id, serial, cert, key, not_after) VALUES ('edge-1', '01', 'cert', '-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----\n', '2030-01-01T00:00:00.000Z')",
+    ).run();
     const keyring = createKeyring(Buffer.alloc(32, 1));
     const vpn = createVpn(db, { network: "10.8.0.0/24", publicHost: "vpn.example.com", keyring });
 

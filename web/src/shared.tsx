@@ -82,7 +82,7 @@ export function bytes(n: number): string {
   const u = ["B", "KiB", "MiB", "GiB", "TiB"];
   let i = 0;
   let v = n;
-  while (v >= 1024 && i < u.length - 1) (v /= 1024), i++;
+  while (v >= 1024 && i < u.length - 1) ((v /= 1024), i++);
   return `${v >= 10 || i === 0 ? Math.round(v) : v.toFixed(1)} ${u[i]}`;
 }
 
@@ -96,7 +96,11 @@ export function download(name: string, text: string, type = "application/x-openv
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "device";
+export const slug = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "") || "device";
 
 export function Problem({ error, title }: { error?: string; title?: string }) {
   const t = useT();
@@ -108,8 +112,34 @@ export function Problem({ error, title }: { error?: string; title?: string }) {
   );
 }
 
-export function List<T>({ label, rows, columns, empty, getRowId, onRowClick }: { label: string; rows: T[] | undefined; columns: Column<T>[]; empty: string; getRowId: (r: T) => string; onRowClick?: (r: T) => void }) {
-  return <DataTable label={label} columns={columns} rows={rows ?? []} loading={!rows} getRowId={getRowId} pageSize={50} density="compact" onRowClick={onRowClick} empty={<EmptyState title={empty} />} />;
+export function List<T>({
+  label,
+  rows,
+  columns,
+  empty,
+  getRowId,
+  onRowClick,
+}: {
+  label: string;
+  rows: T[] | undefined;
+  columns: Column<T>[];
+  empty: string;
+  getRowId: (r: T) => string;
+  onRowClick?: (r: T) => void;
+}) {
+  return (
+    <DataTable
+      label={label}
+      columns={columns}
+      rows={rows ?? []}
+      loading={!rows}
+      getRowId={getRowId}
+      pageSize={50}
+      density="compact"
+      onRowClick={onRowClick}
+      empty={<EmptyState title={empty} />}
+    />
+  );
 }
 
 /** Commands to copy onto a host. */
