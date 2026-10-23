@@ -40,7 +40,7 @@ http://localhost:8080/api/docs/ (click *Authorize* and paste an API token).
 | `VPN_SERVER_TOKEN` | | Deprecated: one token for servers set up before 0.6.0, which never enrolled. Enrol them, then remove it |
 | `VPN_SECRETS_KEY_FILE` | `/run/secrets/openasy-kek` | 32-byte key-encryption key; required. It seals the CA key, server keys and sign-in secrets in the database (ADR 0021) |
 | `VPN_PASSWORD_SIGN_IN` | `true` | `false` when everyone signs in through OIDC |
-| `VPN_OIDC_*` | | Sign-in through your identity provider, see [Sign-in](#sign-in) |
+| `OPENASY_OIDC_*` | | Sign-in through your identity provider, the same names in every product, see [Sign-in](#sign-in) |
 | `VPN_ADMIN_TOKEN` | | Deprecated: one shared admin token without an expiry, for scripts from before sign-in. Use an API token |
 | `VPN_PUBLIC_HOST` | | Host name or IP clients connect to, for servers added without an address of their own |
 | `VPN_NETWORK` | `10.8.0.0/24` | Address pool for clients; each device gets a fixed address from it |
@@ -60,9 +60,12 @@ Sign-in comes from [@openasy/auth](https://github.com/openasy/auth), the same in
   ID, Okta, Google, authentik, ZITADEL or any OpenID Connect provider. The page shows that provider's steps and the
   redirect URI to register, checks the issuer, and maps groups to roles; the client secret is kept encrypted.
 - **OIDC**: register `vpn` with the redirect URI `<VPN_PUBLIC_URL>/api/v1/auth/oidc/sso/callback` and set
-  `VPN_OIDC_ISSUER`, `VPN_OIDC_CLIENT_ID` and `VPN_OIDC_CLIENT_SECRET`. Optional: `VPN_OIDC_NAME`, `VPN_OIDC_SCOPES`,
-  `VPN_OIDC_GROUPS_CLAIM`, `VPN_OIDC_ROLE_MAPPING` (`vpn-admins=admin,staff=viewer`), `VPN_OIDC_DEFAULT_ROLE` and
-  `VPN_OIDC_ALLOWED_DOMAINS`, as in every OpenAsy product.
+  `OPENASY_OIDC_ISSUER`, `OPENASY_OIDC_CLIENT_ID` and `OPENASY_OIDC_CLIENT_SECRET`. Optional: `OPENASY_OIDC_PROVIDER`,
+  `OPENASY_OIDC_NAME`, `OPENASY_OIDC_SCOPES`, `OPENASY_OIDC_GROUPS_CLAIM`, `OPENASY_OIDC_ROLE_MAPPING`
+  (`vpn-admins=admin,staff=viewer`), `OPENASY_OIDC_DEFAULT_ROLE` and `OPENASY_OIDC_ALLOWED_DOMAINS`.
+  `OPENASY_OIDC_AUTO_REDIRECT=true` makes the sign-in page open the provider straight away; `?local=1` still shows the
+  VPN's own form. The names are the same in every OpenAsy product, so an install sets them once; only the client is
+  the VPN's. The names before 0.5.0 of `@openasy/auth`, such as `VPN_OIDC_ISSUER`, still work for now and log a warning.
 
 ## Give someone access
 
