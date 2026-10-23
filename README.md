@@ -130,14 +130,14 @@ image without installing anything:
 
 ```bash
 export VPN_URL=https://vpn.example.com VPN_API_TOKEN=oa_vpn_...
-curl -LO https://github.com/openasy/vpn/releases/download/v0.6.0/openasy-vpn.ts
+curl -LO https://github.com/openasy/vpn/releases/download/v0.7.0/openasy-vpn.ts
 node openasy-vpn.ts help
 node openasy-vpn.ts sessions
 
 # Next to vpn, with compose.yaml: nothing to install, and VPN_URL is not needed
 docker compose exec -T -e VPN_API_TOKEN vpn /nodejs/bin/node cli/openasy-vpn.ts people
 # Anywhere with Docker
-docker run --rm -e VPN_URL -e VPN_API_TOKEN ghcr.io/openasy/vpn:0.6.0 cli/openasy-vpn.ts people
+docker run --rm -e VPN_URL -e VPN_API_TOKEN ghcr.io/openasy/vpn:0.7.0 cli/openasy-vpn.ts people
 ```
 
 `devices add` never overwrites a file; `--out -` prints the `.ovpn` instead, for example to pass it on in a pipe.
@@ -169,12 +169,19 @@ https://openasy.github.io/products/vpn/api
 
 ## Upgrade
 
+### To 0.7.0
+
+- The sign-in variables lose the `VPN_` prefix and have the same names in every product (ADR 0002):
+  `VPN_OIDC_ISSUER` is now `OPENASY_OIDC_ISSUER`, and so on for every `VPN_OIDC_*`. Rename them before upgrading:
+  with the old names, sign-in through the provider is off and only passwords work.
+- `VPN_SERVER_TOKEN` still works, and is removed in 0.8.0.
+
 ### To 0.6.0
 
 - Servers are added under Servers and enrol with their own token (ADR 0032). Servers that report with
   `VPN_SERVER_TOKEN` keep working and are shown as *Legacy*. To move one, click *Enrol*, start it with
   `VPN_ENROLL_TOKEN` and its state directory on a volume (`compose.yaml` adds `vpn-server-data`), then remove
-  `VPN_SERVER_TOKEN` once no server is legacy. `VPN_SERVER_TOKEN` is removed in 0.7.0.
+  `VPN_SERVER_TOKEN` once no server is legacy. `VPN_SERVER_TOKEN` is removed in 0.8.0.
 - An enrolled server cannot be reached with `VPN_SERVER_TOKEN`, and a server's secret fetches only its own config.
 - `GET /api/v1/servers` adds `address`, `status`, `legacy` and `createdAt`; `version` and `lastSeen` are null for a
   server that has not reported yet.
@@ -211,10 +218,10 @@ docker run --rm -v <project>_vpn-manager-data:/from -v <project>_vpn-data:/to al
 Images are signed with cosign (keyless), carry an SPDX SBOM attestation and SLSA level 3 provenance.
 
 ```bash
-cosign verify ghcr.io/openasy/vpn:0.6.0 \
+cosign verify ghcr.io/openasy/vpn:0.7.0 \
   --certificate-identity-regexp '^https://github.com/openasy/vpn/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-cosign verify-attestation --type spdxjson ghcr.io/openasy/vpn:0.6.0 \
+cosign verify-attestation --type spdxjson ghcr.io/openasy/vpn:0.7.0 \
   --certificate-identity-regexp '^https://github.com/openasy/vpn/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 slsa-verifier verify-image ghcr.io/openasy/vpn@sha256:<digest> --source-uri github.com/openasy/vpn

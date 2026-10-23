@@ -1,6 +1,6 @@
 {
   "name": "@openasy/vpn",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "description": "OpenAsy VPN: API and web UI for OpenVPN servers, users and groups.",
   "license": "AGPL-3.0-only",
