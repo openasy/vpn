@@ -174,14 +174,14 @@ https://openasy.github.io/products/vpn/api
 - The sign-in variables lose the `VPN_` prefix and have the same names in every product (ADR 0002): `VPN_OIDC_ISSUER`
   is now `OPENASY_OIDC_ISSUER`, and so on for every `VPN_OIDC_*`. The old names still work, with a warning in the log,
   and go in a later release: rename them.
-- `VPN_SERVER_TOKEN` still works, and is removed in 0.8.0.
+- `VPN_SERVER_TOKEN` still works, with a warning in the log, and goes in a later release.
 
 ### To 0.6.0
 
 - Servers are added under Servers and enrol with their own token (ADR 0032). Servers that report with
   `VPN_SERVER_TOKEN` keep working and are shown as *Legacy*. To move one, click *Enrol*, start it with
   `VPN_ENROLL_TOKEN` and its state directory on a volume (`compose.yaml` adds `vpn-server-data`), then remove
-  `VPN_SERVER_TOKEN` once no server is legacy. `VPN_SERVER_TOKEN` is removed in 0.8.0.
+  `VPN_SERVER_TOKEN` once no server is legacy. A later release removes `VPN_SERVER_TOKEN`.
 - An enrolled server cannot be reached with `VPN_SERVER_TOKEN`, and a server's secret fetches only its own config.
 - `GET /api/v1/servers` adds `address`, `status`, `legacy` and `createdAt`; `version` and `lastSeen` are null for a
   server that has not reported yet.
