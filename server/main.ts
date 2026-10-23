@@ -85,15 +85,7 @@ if (caKey && !caKey.value.startsWith("v1.") && !opensSignInSecrets(kek)) {
   );
   process.exit(1);
 }
-const vpn = createVpn(db, {
-  network: process.env.VPN_NETWORK ?? "10.8.0.0/24",
-  publicHost: process.env.VPN_PUBLIC_HOST,
-  dnsDomain: process.env.VPN_DNS_DOMAIN?.trim() || undefined,
-  // Split-horizon: the domain's names without a record here are asked of public DNS, unless this is false.
-  dnsForward: process.env.VPN_DNS_FORWARD?.trim().toLowerCase() !== "false",
-  version,
-  keyring: createKeyring(kek),
-});
+const vpn = createVpn(db, { network: process.env.VPN_NETWORK ?? "10.8.0.0/24", publicHost: process.env.VPN_PUBLIC_HOST, version, keyring: createKeyring(kek) });
 try {
   const { sealed } = await vpn.init();
   if (sealed) log("info", "sealed keys stored in the clear by an earlier version", { sealed });

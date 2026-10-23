@@ -1,4 +1,4 @@
-import { Badge, Button, Callout, Checkbox, Dialog, EmptyState, navigate, PageHeader, Panel, StatusBadge, Switch, TextField, type Column } from "@openasy/ui";
+import { Badge, Button, Callout, Checkbox, Dialog, EmptyState, navigate, PageHeader, Panel, StatusBadge, TextField, type Column } from "@openasy/ui";
 import { useAuth } from "@openasy/auth/react";
 import { Ban, Check, Download, Laptop, Plus, Trash2, UserCheck, UserX } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
@@ -218,10 +218,6 @@ function Devices({ call, person, devices, onChange }: { call: Call; person: Pers
   };
   const revoke = (d: Device) =>
     window.confirm(t("devices.confirmRevoke", { name: d.name })) && void action.run(() => call(`/api/v1/devices/${d.id}`, { method: "DELETE" })).then(onChange);
-  // The install's internal names (ADR 0054): each device may turn them off, and keeps the connection it had.
-  const names = useData<{ domain: string | null }>(call, "/api/v1/internal-names", 0);
-  const setNames = (d: Device, on: boolean) =>
-    void action.run(() => call(`/api/v1/devices/${d.id}`, { method: "PATCH", body: JSON.stringify({ internalNames: on }) })).then(onChange);
   const columns: Column<Device>[] = [
     { id: "name", header: t("common.device"), cell: (d) => d.name, sortValue: (d) => d.name },
     { id: "ip", header: t("common.vpnAddress"), width: "120px", mono: true, cell: (d) => d.vpnIp },
@@ -240,24 +236,6 @@ function Devices({ call, person, devices, onChange }: { call: Call; person: Pers
       sortValue: (d) => (d.revokedAt ? `0${d.revokedAt}` : `1${d.notAfter}`),
     },
     { id: "created", header: t("common.added"), width: "110px", cell: (d) => ago(t, d.createdAt), sortValue: (d) => d.createdAt },
-    ...(names.data?.domain
-      ? [
-          {
-            id: "names",
-            header: t("devices.internalNames"),
-            width: "120px",
-            cell: (d: Device) =>
-              !d.revokedAt && (
-                <Switch
-                  checked={d.internalNames}
-                  onCheckedChange={(on) => setNames(d, on)}
-                  disabled={!can("editor")}
-                  label={<span className="sr-only">{t("devices.internalNamesFor", { name: d.name })}</span>}
-                />
-              ),
-          } satisfies Column<Device>,
-        ]
-      : []),
     ...(can("editor")
       ? [
           {

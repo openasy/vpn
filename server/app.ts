@@ -6,8 +6,6 @@ import type { DatabaseSync } from "node:sqlite";
 import { AuthError, mergeOpenApi, sendProblem, type Auth, type Role } from "@openasy/auth";
 import { log } from "./log.ts";
 import { countRequest, renderMetrics } from "./metrics.ts";
-import { createAcme } from "./acme.ts";
-import { mobileconfig, toDer } from "./pki.ts";
 import type { ProductLink } from "./products.ts";
 import { SERVER_ID, VpnError, type ReportedSession, type Vpn } from "./vpn.ts";
 
@@ -27,8 +25,6 @@ export interface AppOptions {
    * from Settings instead; this one has no expiry and is not tied to a person.
    */
   adminToken?: string;
-  /** Where ACME's http-01 is checked: 80 unless a test says otherwise (ADR 0054). */
-  acmeHttpPort?: number;
   /** Built web UI; omit to run headless (ADR 0018). */
   webDir?: string;
   /** Built API reference (Swagger UI), served at /api/docs. */
@@ -188,7 +184,7 @@ function parseSessions(value: unknown): ReportedSession[] {
 /** Sessions from a server that has not reported for this long are not shown: they may be gone. */
 const SESSION_FRESH_MS = 60_000;
 
-export function createApp({ db, vpn, version, auth, serverToken, adminToken, webDir, docsDir, openapi, products = [], acmeHttpPort }: AppOptions) {
+export function createApp({ db, vpn, version, auth, serverToken, adminToken, webDir, docsDir, openapi, products = [] }: AppOptions) {
   // The served description includes /api/v1/auth from @openasy/auth, so the API reference documents sign-in too.
   const spec = openapi && JSON.stringify({ ...mergeOpenApi(openapi), info: { ...(openapi.info as object), version } });
   const countServers = db.prepare("SELECT COUNT(*) AS n FROM servers");
@@ -295,74 +291,12 @@ export function createApp({ db, vpn, version, auth, serverToken, adminToken, web
       auth: "editor",
       handle: async ({ res, params, body }) => created(res, await vpn.createDevice(params[0]!, await body())),
     },
-    { method: "PATCH", path: "/api/v1/devices/:id", auth: "editor", handle: async ({ params, body }) => vpn.updateDevice(params[0]!, await body()) },
     { method: "DELETE", path: "/api/v1/devices/:id", auth: "editor", handle: ({ params }) => vpn.revokeDevice(params[0]!) },
 
     // Groups and IP groups.
     { method: "GET", path: "/api/v1/groups", auth: "viewer", handle: () => ({ groups: vpn.listGroups() }) },
     { method: "POST", path: "/api/v1/groups", auth: "admin", handle: async ({ res, body }) => created(res, vpn.createGroup(await body())) },
     { method: "DELETE", path: "/api/v1/groups/:id", auth: "admin", handle: ({ res, params }) => (vpn.deleteGroup(params[0]!), noContent(res)) },
-    // Internal names (ADR 0054): served by every vpn-server to devices, under VPN_DNS_DOMAIN.
-    { method: "GET", path: "/api/v1/internal-names", auth: "viewer", handle: () => vpn.internalNames() },
-    { method: "POST", path: "/api/v1/internal-names", auth: "admin", handle: async ({ res, body }) => created(res, vpn.createInternalName(await body())) },
-    {
-      method: "DELETE",
-      path: "/api/v1/internal-names/:id",
-      auth: "admin",
-      handle: ({ res, params }) => (vpn.deleteInternalName(params[0]!), noContent(res)),
-    },
-    // The internal CA (ADR 0054): its root, which anyone may fetch to install, and the certificates it issues.
-    { method: "GET", path: "/api/v1/internal-ca", auth: "viewer", handle: () => vpn.internalCa() },
-    { method: "GET", path: "/api/v1/internal-ca/acme-keys", auth: "admin", handle: () => ({ keys: vpn.listAcmeKeys() }) },
-    {
-      method: "POST",
-      path: "/api/v1/internal-ca/acme-keys",
-      auth: "admin",
-      handle: async ({ req, res, body }) =>
-        created(res, {
-          ...vpn.createAcmeKey(await body()),
-          directory: `${req.headers["x-forwarded-proto"] === "https" ? "https" : "http"}://${req.headers.host}/acme/directory`,
-        }),
-    },
-    {
-      method: "DELETE",
-      path: "/api/v1/internal-ca/acme-keys/:id",
-      auth: "admin",
-      handle: ({ res, params }) => (vpn.deleteAcmeKey(params[0]!), noContent(res)),
-    },
-    {
-      method: "POST",
-      path: "/api/v1/internal-ca/certificates",
-      auth: "admin",
-      handle: async ({ res, body }) => created(res, await vpn.issueInternal(await body())),
-    },
-    {
-      method: "GET",
-      path: "/api/v1/internal-ca/root.crt",
-      auth: "none",
-      handle: ({ req, res }) => {
-        const pem = vpn.internalRootPem();
-        if (!pem) throw new HttpProblem(404, "not-found", "No internal CA: set VPN_DNS_DOMAIN to make one.");
-        const der = new URL(req.url ?? "/", "http://x").searchParams.get("format") === "der";
-        send(res, 200, der ? toDer(pem) : pem, der ? "application/pkix-cert" : "application/x-pem-file", {
-          "content-disposition": `attachment; filename="openasy-internal-ca.${der ? "cer" : "crt"}"`,
-          "cache-control": "no-cache",
-        });
-      },
-    },
-    {
-      method: "GET",
-      path: "/api/v1/internal-ca/root.mobileconfig",
-      auth: "none",
-      handle: ({ res }) => {
-        const pem = vpn.internalRootPem();
-        if (!pem) throw new HttpProblem(404, "not-found", "No internal CA: set VPN_DNS_DOMAIN to make one.");
-        send(res, 200, mobileconfig(pem, vpn.internalCa().domain!), "application/x-apple-aspen-config", {
-          "content-disposition": 'attachment; filename="openasy-internal-ca.mobileconfig"',
-          "cache-control": "no-cache",
-        });
-      },
-    },
     { method: "GET", path: "/api/v1/ip-groups", auth: "viewer", handle: () => ({ ipGroups: vpn.listIpGroups() }) },
     { method: "POST", path: "/api/v1/ip-groups", auth: "admin", handle: async ({ res, body }) => created(res, vpn.createIpGroup(await body())) },
     { method: "GET", path: "/api/v1/ip-groups/:id", auth: "viewer", handle: ({ params }) => vpn.ipGroup(params[0]!) },
@@ -402,8 +336,6 @@ export function createApp({ db, vpn, version, auth, serverToken, adminToken, web
     );
   }
 
-  const acme = createAcme({ db, ...vpn.acmeOptions(), httpPort: acmeHttpPort, log: (level, msg, fields) => log(level, msg, fields) });
-
   async function route(req: IncomingMessage, res: ServerResponse): Promise<string> {
     const url = new URL(req.url ?? "/", "http://localhost");
     const path = url.pathname;
@@ -437,10 +369,6 @@ export function createApp({ db, vpn, version, auth, serverToken, adminToken, web
       if (!(await serveFile(res, docsDir, relative))) problem(res, 404, "not-found");
       return "/api/docs";
     }
-
-    // ACME for the internal CA (ADR 0054): its own JWS requests and errors (RFC 8555).
-    const acmeRoute = await acme.handle(req, res);
-    if (acmeRoute) return acmeRoute;
 
     if (await auth.handle(req, res)) return auth.routeName(req) ?? "/api/v1/auth/*";
 

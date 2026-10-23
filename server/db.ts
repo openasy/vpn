@@ -87,8 +87,8 @@ const MIGRATIONS = [
      SELECT id, 1, version, listen, openvpn_running, config_version, last_seen, last_seen FROM servers;
    DROP TABLE servers;
    ALTER TABLE servers_new RENAME TO servers`,
-  // 0.10.0: internal names (ADR 0054). A name is kept relative to the install's domain, so changing the domain keeps
-  // them; IP groups and devices may turn the names off, and both start with them on.
+  // 0.10.0: internal names, the internal CA and ACME (ADR 0054). 0.11.0 took them out again; the tables stay, unused,
+  // because migrations only go forward (ADR 0010) and a later one must not take this one's place.
   `CREATE TABLE internal_names (
      id TEXT PRIMARY KEY,
      name TEXT NOT NULL COLLATE NOCASE,

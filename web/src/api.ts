@@ -1,8 +1,8 @@
 // The UI is an ordinary client of the public API (ADR 0014, 0018). Types follow openapi.json and server/vpn.ts.
 import type { ProductLink } from "../../server/products.ts";
-import type { Device, Group, InternalCa, InternalCertificate, InternalName, IpGroup, IpNetwork, Person, Server, Session } from "../../server/vpn.ts";
+import type { Device, Group, IpGroup, IpNetwork, Person, Server, Session } from "../../server/vpn.ts";
 
-export type { Device, Group, InternalCa, InternalCertificate, InternalName, IpGroup, IpNetwork, Person, ProductLink, Server, Session };
+export type { Device, Group, IpGroup, IpNetwork, Person, ProductLink, Server, Session };
 
 /** A server just added or enrolled again, with its one-time token. */
 export interface NewServer {
