@@ -12,7 +12,7 @@ import {
   type ProductId,
   useThemePreference,
 } from "@openasy/ui";
-import { AccountSettings, AuthGate, MembersSettings, SignInSettings, TokensSettings, useAuth } from "@openasy/auth/react";
+import { AccountSettings, AuthGate, MembersSettings, SignInSettings, TokensSettings, useAuth, useInstallBrand } from "@openasy/auth/react";
 import { Activity, KeyRound, LogIn, LogOut, Network, Server as ServerIcon, UserRound, Users, UsersRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type Person, type ProductLink, type Session } from "./api.ts";
@@ -134,11 +134,12 @@ function Product() {
 }
 
 export function App() {
+  const installBrand = useInstallBrand();
   const [theme] = useThemePreference();
   const [locale] = useLocalePreference();
   return (
-    // No organization until branding is configurable (ADR 0004); the library's default is a placeholder.
-    <BrandProvider theme={theme} locale={locale} brand={{ name: "OpenAsy", organization: undefined }} className="min-h-screen">
+    // The install's brand from config/brand.env (ADR 0053); OpenAsy's own look where it sets none.
+    <BrandProvider theme={theme} locale={locale} brand={{ name: "OpenAsy", organization: undefined, ...installBrand }} className="min-h-screen">
       <AuthGate product="OpenAsy VPN">
         <Product />
       </AuthGate>
