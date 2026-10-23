@@ -1,9 +1,10 @@
-import { AppShell, BrandProvider, Button, EmptyState, navigate, PageHeader, PRODUCT_IDS, usePath, type ProductId, useThemePreference } from "@openasy/ui";
+import { AppShell, BrandProvider, Button, EmptyState, navigate, PageHeader, PRODUCT_IDS, toLocale, useLocalePreference, usePath, type ProductId, useThemePreference } from "@openasy/ui";
 import { AccountSettings, AuthGate, MembersSettings, SignInSettings, TokensSettings, useAuth } from "@openasy/auth/react";
 import { Activity, KeyRound, LogIn, LogOut, Network, Server as ServerIcon, UserRound, Users, UsersRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type Person, type ProductLink, type Session } from "./api.ts";
 import { AccessPage } from "./access.tsx";
+import { useT } from "./i18n.ts";
 import { PeoplePage, PersonPage } from "./people.tsx";
 import { ServersPage } from "./servers.tsx";
 import { SessionsPage } from "./sessions.tsx";
@@ -20,15 +21,10 @@ function parseRoute(path: string): Route {
   return { page: "people" };
 }
 
-const SETTINGS = {
-  account: ["Account", "Your profile, password, two-step verification and where you are signed in."],
-  members: ["Members", "Who can sign in to this VPN, and with which role. Viewers see everything; editors also add people and devices and end sessions; admins also remove people and manage groups, IP groups, members and tokens."],
-  signin: ["Sign-in", "Identity providers people can sign in with, such as OpenAsy Identity, Keycloak or Microsoft Entra ID, and which of their groups give which role."],
-  tokens: ["API tokens", "For scripts and the command line tool. Each token has one role and an expiry; the secret is shown once."],
-} as const;
-
 function Product() {
+  const t = useT();
   const [theme, setTheme] = useThemePreference();
+  const [, setLocale] = useLocalePreference();
   const { me, can, signOut } = useAuth();
   const call = useApi();
   const [version, setVersion] = useState<string>();
@@ -49,22 +45,21 @@ function Product() {
   }, [call]);
 
   const nav = [
-    { id: "people", label: "People", icon: UsersRound, count: people.data?.people.length || undefined },
-    { id: "access", label: "Access", icon: Network },
-    { id: "sessions", label: "Sessions", icon: Activity, count: sessions.data?.sessions.length || undefined },
-    { id: "servers", label: "Servers", icon: ServerIcon },
+    { id: "people", label: t("nav.people"), icon: UsersRound, count: people.data?.people.length || undefined },
+    { id: "access", label: t("nav.access"), icon: Network },
+    { id: "sessions", label: t("nav.sessions"), icon: Activity, count: sessions.data?.sessions.length || undefined },
+    { id: "servers", label: t("nav.servers"), icon: ServerIcon },
   ];
   const footerNav = [
     ...(can("admin")
       ? [
-          { id: "members", label: "Members", icon: Users },
-          { id: "signin", label: "Sign-in", icon: LogIn },
-          { id: "tokens", label: "API tokens", icon: KeyRound },
+          { id: "members", label: t("nav.members"), icon: Users },
+          { id: "signin", label: t("nav.signin"), icon: LogIn },
+          { id: "tokens", label: t("nav.tokens"), icon: KeyRound },
         ]
       : []),
-    { id: "account", label: "Account", icon: UserRound },
+    { id: "account", label: t("nav.account"), icon: UserRound },
   ];
-  const roleName = me.user.role.charAt(0).toUpperCase() + me.user.role.slice(1);
   const page = route.page;
   const settings = page === "account" || page === "members" || page === "signin" || page === "tokens" ? page : undefined;
 
@@ -80,9 +75,10 @@ function Product() {
         if (to) window.location.assign(to.url);
       }}
       footerNav={footerNav}
-      user={{ name: me.user.name, role: roleName }}
+      user={{ name: me.user.name, role: t(`role.${me.user.role}`) }}
       theme={theme}
       onThemeChange={setTheme}
+      onLanguageChange={(code) => setLocale(toLocale(code))}
     >
       {route.page === "person" ? (
         <PersonPage key={route.id} call={call} id={route.id} />
@@ -95,16 +91,16 @@ function Product() {
       ) : page === "servers" ? (
         <ServersPage call={call} version={version} />
       ) : !settings ? null : settings !== "account" && !can("admin") ? (
-        <EmptyState title="Admins only">Ask an admin of this VPN for access.</EmptyState>
+        <EmptyState title={t("settings.adminsOnly")}>{t("settings.askAdmin")}</EmptyState>
       ) : (
         <>
           <PageHeader
-            title={SETTINGS[settings][0]}
-            description={SETTINGS[settings][1]}
+            title={t(`nav.${settings}`)}
+            description={t(`settings.${settings}`)}
             actions={
               settings === "account" && (
                 <Button icon={<LogOut />} onClick={() => void signOut()}>
-                  Sign out
+                  {t("settings.signOut")}
                 </Button>
               )
             }
@@ -118,9 +114,10 @@ function Product() {
 
 export function App() {
   const [theme] = useThemePreference();
+  const [locale] = useLocalePreference();
   return (
     // No organization until branding is configurable (ADR 0004); the library's default is a placeholder.
-    <BrandProvider theme={theme} brand={{ name: "OpenAsy", organization: undefined }} className="min-h-screen">
+    <BrandProvider theme={theme} locale={locale} brand={{ name: "OpenAsy", organization: undefined }} className="min-h-screen">
       <AuthGate product="OpenAsy VPN">
         <Product />
       </AuthGate>

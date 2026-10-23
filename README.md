@@ -233,6 +233,10 @@ e2e/run.sh     # needs Docker and the vpn:dev and vpn-server:dev images: a real 
 
 Node runs the TypeScript sources in `server/` directly; there is no build step for the server.
 
+The web UI speaks English, Turkish and German; the top bar has a language menu next to the theme. Its words are in
+`web/src/messages/en.json`, `tr.json` and `de.json`, read with i18next through `@openasy/ui` (its ADR 0006). A key
+missing in a language fails the typecheck, and `web/src/messages.test.ts` checks the placeholders.
+
 ## Release
 
 1. Set `version` in `package.json`, merge to `main`.

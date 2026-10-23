@@ -3,16 +3,19 @@ import { useAuth } from "@openasy/auth/react";
 import { Ban, Check, Download, Laptop, Plus, Trash2, UserCheck, UserX } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import type { Device, Group, Person } from "./api.ts";
+import { useT } from "./i18n.ts";
 import { SessionTable } from "./sessions.tsx";
 import { ago, date, download, List, Problem, slug, useAction, useData, type Call } from "./shared.tsx";
 
 function PersonStatus({ status }: { status: Person["status"] }) {
-  return <StatusBadge tone={status === "active" ? "success" : "warning"}>{status === "active" ? "Active" : "Suspended"}</StatusBadge>;
+  const t = useT();
+  return <StatusBadge tone={status === "active" ? "success" : "warning"}>{status === "active" ? t("people.active") : t("people.suspended")}</StatusBadge>;
 }
 
 /** Ticks for every group; the names are what the API takes. */
 function GroupPicker({ groups, value, onChange, disabled }: { groups: Group[]; value: string[]; onChange: (v: string[]) => void; disabled?: boolean }) {
-  if (!groups.length) return <span className="text-sm text-fg-muted">No groups yet. Admins add them under Access.</span>;
+  const t = useT();
+  if (!groups.length) return <span className="text-sm text-fg-muted">{t("people.noGroups")}</span>;
   return (
     <div className="flex flex-wrap gap-3">
       {groups.map((g) => (
@@ -24,37 +27,38 @@ function GroupPicker({ groups, value, onChange, disabled }: { groups: Group[]; v
 
 export function PeoplePage({ call }: { call: Call }) {
   const { can } = useAuth();
+  const t = useT();
   const { data, reload } = useData<{ people: Person[] }>(call, "/api/v1/people");
   const groups = useData<{ groups: Group[] }>(call, "/api/v1/groups", 0);
   const [adding, setAdding] = useState(false);
   const columns: Column<Person>[] = [
-    { id: "name", header: "Name", cell: (p) => <a href={`/people/${p.id}`}>{p.name}</a>, sortValue: (p) => p.name },
-    { id: "email", header: "Email", cell: (p) => p.email, sortValue: (p) => p.email },
-    { id: "status", header: "Status", width: "120px", cell: (p) => <PersonStatus status={p.status} />, sortValue: (p) => p.status },
-    { id: "groups", header: "Groups", cell: (p) => (p.groups.length ? <span className="flex flex-wrap gap-1">{p.groups.map((g) => <Badge key={g}>{g}</Badge>)}</span> : "–") },
-    { id: "devices", header: "Devices", width: "90px", align: "right", mono: true, cell: (p) => p.devices, sortValue: (p) => p.devices },
+    { id: "name", header: t("common.name"), cell: (p) => <a href={`/people/${p.id}`}>{p.name}</a>, sortValue: (p) => p.name },
+    { id: "email", header: t("common.email"), cell: (p) => p.email, sortValue: (p) => p.email },
+    { id: "status", header: t("common.status"), width: "120px", cell: (p) => <PersonStatus status={p.status} />, sortValue: (p) => p.status },
+    { id: "groups", header: t("common.groups"), cell: (p) => (p.groups.length ? <span className="flex flex-wrap gap-1">{p.groups.map((g) => <Badge key={g}>{g}</Badge>)}</span> : "–") },
+    { id: "devices", header: t("common.devices"), width: "90px", align: "right", mono: true, cell: (p) => p.devices, sortValue: (p) => p.devices },
   ];
   return (
     <>
       <PageHeader
-        title="People"
-        description="Everyone who may connect. Each device of a person gets its own certificate and fixed VPN address; their groups decide which networks it reaches."
+        title={t("people.title")}
+        description={t("people.description")}
         actions={
           can("editor") && (
             <Button variant="primary" icon={<Plus />} onClick={() => setAdding(true)}>
-              Add person
+              {t("people.add")}
             </Button>
           )
         }
       />
       {adding && <AddPerson call={call} groups={groups.data?.groups ?? []} onDone={(p) => (setAdding(false), reload(), p && navigate(`/people/${p.id}`))} />}
       {data?.people.length === 0 ? (
-        <EmptyState title="Nobody yet" action={can("editor") && <Button onClick={() => setAdding(true)}>Add the first person</Button>}>
-          Add a person, then a device for them, and send them the .ovpn file it gives you.
+        <EmptyState title={t("people.nobody")} action={can("editor") && <Button onClick={() => setAdding(true)}>{t("people.addFirst")}</Button>}>
+          {t("people.emptyBody")}
         </EmptyState>
       ) : (
         <Panel flush>
-          <List label="People" rows={data?.people} columns={columns} empty="Nobody yet" getRowId={(p) => p.id} />
+          <List label={t("people.title")} rows={data?.people} columns={columns} empty={t("people.nobody")} getRowId={(p) => p.id} />
         </Panel>
       )}
     </>
@@ -62,6 +66,7 @@ export function PeoplePage({ call }: { call: Call }) {
 }
 
 function AddPerson({ call, groups, onDone }: { call: Call; groups: Group[]; onDone: (p?: Person) => void }) {
+  const t = useT();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [chosen, setChosen] = useState<string[]>([]);
@@ -75,25 +80,25 @@ function AddPerson({ call, groups, onDone }: { call: Call; groups: Group[]; onDo
     <Dialog
       open
       onOpenChange={(open) => !open && onDone()}
-      title="Add a person"
-      description="They get devices that may connect. Signing in to this VPN product is under Members."
+      title={t("people.addTitle")}
+      description={t("people.addBody")}
       onSubmit={submit}
       footer={
         <>
           <Button type="button" onClick={() => onDone()}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button type="submit" variant="primary" loading={action.busy} disabled={!name || !email}>
-            Add person
+            {t("people.add")}
           </Button>
         </>
       }
     >
-      <Problem error={action.error} title="Not added" />
-      <TextField label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Dana Kim" />
-      <TextField label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="dana@example.com" />
+      <Problem error={action.error} title={t("common.notAdded")} />
+      <TextField label={t("common.name")} value={name} onChange={(e) => setName(e.target.value)} placeholder="Dana Kim" />
+      <TextField label={t("common.email")} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="dana@example.com" />
       <fieldset className="flex flex-col gap-2">
-        <legend className="mb-2 text-sm font-medium">Groups</legend>
+        <legend className="mb-2 text-sm font-medium">{t("common.groups")}</legend>
         <GroupPicker groups={groups} value={chosen} onChange={setChosen} />
       </fieldset>
     </Dialog>
@@ -102,6 +107,7 @@ function AddPerson({ call, groups, onDone }: { call: Call; groups: Group[]; onDo
 
 export function PersonPage({ call, id }: { call: Call; id: string }) {
   const { can } = useAuth();
+  const t = useT();
   const person = useData<Person>(call, `/api/v1/people/${id}`, 0);
   const devices = useData<{ devices: Device[] }>(call, `/api/v1/people/${id}/devices`, 0);
   const groups = useData<{ groups: Group[] }>(call, "/api/v1/groups", 0);
@@ -109,11 +115,11 @@ export function PersonPage({ call, id }: { call: Call; id: string }) {
   const [chosen, setChosen] = useState<string[]>([]);
   const p = person.data;
   useEffect(() => setChosen(p?.groups ?? []), [p]);
-  if (person.error) return <EmptyState title="Not found">{person.error}</EmptyState>;
+  if (person.error) return <EmptyState title={t("people.notFound")}>{person.error}</EmptyState>;
   if (!p) return null;
   const change = (body: object) => action.run(() => call<Person>(`/api/v1/people/${id}`, { method: "PATCH", body: JSON.stringify(body) })).then(() => person.reload());
   const remove = () =>
-    window.confirm(`Remove ${p.name}? Their devices are revoked and disconnected, and this cannot be undone.`) &&
+    window.confirm(t("people.confirmRemove", { name: p.name })) &&
     void action.run(() => call(`/api/v1/people/${id}`, { method: "DELETE" })).then((ok) => ok && navigate("/people"));
   const dirty = chosen.slice().sort().join("\n") !== p.groups.slice().sort().join("\n");
   return (
@@ -121,23 +127,23 @@ export function PersonPage({ call, id }: { call: Call; id: string }) {
       <PageHeader
         title={p.name}
         description={p.email}
-        breadcrumbs={[{ label: "People", href: "/people" }, { label: p.name }]}
+        breadcrumbs={[{ label: t("people.title"), href: "/people" }, { label: p.name }]}
         meta={<PersonStatus status={p.status} />}
         actions={
           <span className="flex flex-wrap gap-2">
             {can("editor") &&
               (p.status === "active" ? (
-                <Button icon={<UserX />} onClick={() => window.confirm(`Suspend ${p.name}? Their devices are disconnected within 15 seconds and cannot connect until you activate them again.`) && void change({ status: "suspended" })}>
-                  Suspend
+                <Button icon={<UserX />} onClick={() => window.confirm(t("people.confirmSuspend", { name: p.name })) && void change({ status: "suspended" })}>
+                  {t("people.suspend")}
                 </Button>
               ) : (
                 <Button icon={<UserCheck />} onClick={() => void change({ status: "active" })}>
-                  Activate
+                  {t("people.activate")}
                 </Button>
               ))}
             {can("admin") && (
               <Button variant="danger" icon={<Trash2 />} onClick={remove}>
-                Remove
+                {t("common.remove")}
               </Button>
             )}
           </span>
@@ -145,24 +151,24 @@ export function PersonPage({ call, id }: { call: Call; id: string }) {
       />
       <Problem error={action.error} />
       {p.status === "suspended" && (
-        <Callout tone="warning" title="Suspended">
-          None of their devices can connect. Activate them to let their devices back in; their certificates stay valid.
+        <Callout tone="warning" title={t("people.suspended")}>
+          {t("people.suspendedBody")}
         </Callout>
       )}
       <Devices call={call} person={p} devices={devices.data?.devices} onChange={() => (devices.reload(), person.reload())} />
-      <Panel title="Groups" description="Which IP groups their devices reach comes from these.">
+      <Panel title={t("common.groups")} description={t("people.groupsBody")}>
         <div className="flex flex-col gap-3">
           <GroupPicker groups={groups.data?.groups ?? []} value={chosen} onChange={setChosen} disabled={!can("editor")} />
           {can("editor") && dirty && (
             <div>
               <Button size="sm" variant="primary" loading={action.busy} onClick={() => void change({ groups: chosen })}>
-                Save groups
+                {t("people.saveGroups")}
               </Button>
             </div>
           )}
         </div>
       </Panel>
-      <Panel title="Connected now" flush>
+      <Panel title={t("people.connectedNow")} flush>
         <SessionTable call={call} personId={p.id} />
       </Panel>
     </>
@@ -171,6 +177,7 @@ export function PersonPage({ call, id }: { call: Call; id: string }) {
 
 function Devices({ call, person, devices, onChange }: { call: Call; person: Person; devices: Device[] | undefined; onChange: () => void }) {
   const { can } = useAuth();
+  const t = useT();
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [file, setFile] = useState<{ name: string; ovpn: string }>();
@@ -187,26 +194,26 @@ function Devices({ call, person, devices, onChange }: { call: Call; person: Pers
     if (ok) onChange();
   };
   const revoke = (d: Device) =>
-    window.confirm(`Revoke ${d.name}? It is disconnected within 15 seconds and its .ovpn file stops working for good.`) &&
+    window.confirm(t("devices.confirmRevoke", { name: d.name })) &&
     void action.run(() => call(`/api/v1/devices/${d.id}`, { method: "DELETE" })).then(onChange);
   const columns: Column<Device>[] = [
-    { id: "name", header: "Device", cell: (d) => d.name, sortValue: (d) => d.name },
-    { id: "ip", header: "VPN address", width: "120px", mono: true, cell: (d) => d.vpnIp },
+    { id: "name", header: t("common.device"), cell: (d) => d.name, sortValue: (d) => d.name },
+    { id: "ip", header: t("common.vpnAddress"), width: "120px", mono: true, cell: (d) => d.vpnIp },
     {
       id: "state",
-      header: "Certificate",
+      header: t("devices.certificate"),
       width: "190px",
       cell: (d) =>
         d.revokedAt ? (
-          <Badge tone="danger">Revoked {ago(d.revokedAt)}</Badge>
+          <Badge tone="danger">{t("devices.revoked", { when: ago(t, d.revokedAt) })}</Badge>
         ) : Date.parse(d.notAfter) < Date.now() ? (
-          <Badge tone="warning">Expired {date(d.notAfter)}</Badge>
+          <Badge tone="warning">{t("devices.expired", { date: date(d.notAfter) })}</Badge>
         ) : (
-          <span className="text-sm">Valid until {date(d.notAfter)}</span>
+          <span className="text-sm">{t("devices.validUntil", { date: date(d.notAfter) })}</span>
         ),
       sortValue: (d) => (d.revokedAt ? `0${d.revokedAt}` : `1${d.notAfter}`),
     },
-    { id: "created", header: "Added", width: "110px", cell: (d) => ago(d.createdAt), sortValue: (d) => d.createdAt },
+    { id: "created", header: t("common.added"), width: "110px", cell: (d) => ago(t, d.createdAt), sortValue: (d) => d.createdAt },
     ...(can("editor")
       ? [
           {
@@ -216,7 +223,7 @@ function Devices({ call, person, devices, onChange }: { call: Call; person: Pers
             cell: (d: Device) =>
               !d.revokedAt && (
                 <Button size="xs" variant="ghost" icon={<Ban />} onClick={() => revoke(d)}>
-                  Revoke
+                  {t("devices.revoke")}
                 </Button>
               ),
           } satisfies Column<Device>,
@@ -225,13 +232,13 @@ function Devices({ call, person, devices, onChange }: { call: Call; person: Pers
   ];
   return (
     <Panel
-      title="Devices"
-      description="One certificate per device, valid for a year. A lost or replaced device is revoked; add a new one for the new device."
+      title={t("common.devices")}
+      description={t("devices.description")}
       actions={
         can("editor") &&
         person.status === "active" && (
           <Button size="sm" icon={<Laptop />} onClick={() => setAdding(true)}>
-            Add device
+            {t("devices.add")}
           </Button>
         )
       }
@@ -244,20 +251,20 @@ function Devices({ call, person, devices, onChange }: { call: Call; person: Pers
             onOpenChange={(open) => !open && close()}
             icon={<Check aria-hidden className="size-4" />}
             iconTone="success"
-            title="Device added. Send its file now"
-            description={`${file.name} downloaded. It holds the device's private key; they import it into an OpenVPN client.`}
+            title={t("devices.addedTitle")}
+            description={t("devices.addedBody", { file: file.name })}
             footer={
               <Button variant="primary" onClick={close}>
-                Done
+                {t("common.done")}
               </Button>
             }
           >
-            <Callout tone="warning" title="This VPN does not keep the file">
-              It cannot be downloaded again once this dialog closes. Send it privately.
+            <Callout tone="warning" title={t("devices.notKept")}>
+              {t("devices.notKeptBody")}
             </Callout>
             <span>
               <Button icon={<Download />} onClick={() => download(file.name, file.ovpn)}>
-                Download again
+                {t("devices.downloadAgain")}
               </Button>
             </span>
           </Dialog>
@@ -265,30 +272,30 @@ function Devices({ call, person, devices, onChange }: { call: Call; person: Pers
           <Dialog
             open={adding}
             onOpenChange={(open) => !open && close()}
-            title={`Add a device for ${person.name}`}
-            description="It gets its own certificate and VPN address. Its .ovpn file downloads once."
+            title={t("devices.addFor", { name: person.name })}
+            description={t("devices.addBody")}
             onSubmit={add}
             footer={
               <>
                 <Button type="button" onClick={close}>
-                  Cancel
+                  {t("common.cancel")}
                 </Button>
                 <Button type="submit" variant="primary" icon={<Download />} loading={action.busy} disabled={!name}>
-                  Add and download
+                  {t("devices.addAndDownload")}
                 </Button>
               </>
             }
           >
-            <Problem error={action.error} title="Not added" />
-            <TextField label="Device" value={name} onChange={(e) => setName(e.target.value)} placeholder="Work laptop" />
+            <Problem error={action.error} title={t("common.notAdded")} />
+            <TextField label={t("common.device")} value={name} onChange={(e) => setName(e.target.value)} placeholder={t("devices.placeholder")} />
           </Dialog>
         )}
         {devices && devices.length === 0 ? (
-          <EmptyState title="No devices yet">
-            Add one; you get its .ovpn file once.
+          <EmptyState title={t("devices.noneYet")}>
+            {t("devices.noneYetBody")}
           </EmptyState>
         ) : (
-          <List label={`Devices of ${person.name}`} rows={devices} columns={columns} empty="No devices" getRowId={(d) => d.id} />
+          <List label={t("devices.of", { name: person.name })} rows={devices} columns={columns} empty={t("devices.none")} getRowId={(d) => d.id} />
         )}
       </div>
     </Panel>

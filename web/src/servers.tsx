@@ -3,19 +3,21 @@ import { useAuth } from "@openasy/auth/react";
 import { Check, Pencil, Plus, RotateCw, Trash2 } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import type { NewServer, Server } from "./api.ts";
+import { useT, type T } from "./i18n.ts";
 import { ago, Code, List, Problem, useAction, useData, type Call } from "./shared.tsx";
 
-function state(s: Server): { tone: "success" | "warning" | "danger" | "info"; label: string } {
-  if (s.status === "waiting-to-enrol") return { tone: "info", label: "Waiting to enrol" };
-  if (s.status === "offline") return { tone: "danger", label: "Offline" };
-  if (s.status === "version-mismatch") return { tone: "danger", label: "Other version" };
-  if (!s.openvpnRunning) return { tone: "danger", label: "OpenVPN stopped" };
-  if (!s.configVersion) return { tone: "warning", label: "No config applied" };
-  return { tone: "success", label: "Running" };
+function state(t: T, s: Server): { tone: "success" | "warning" | "danger" | "info"; label: string } {
+  if (s.status === "waiting-to-enrol") return { tone: "info", label: t("servers.waiting") };
+  if (s.status === "offline") return { tone: "danger", label: t("servers.offline") };
+  if (s.status === "version-mismatch") return { tone: "danger", label: t("servers.otherVersion") };
+  if (!s.openvpnRunning) return { tone: "danger", label: t("servers.openvpnStopped") };
+  if (!s.configVersion) return { tone: "warning", label: t("servers.noConfig") };
+  return { tone: "success", label: t("servers.running") };
 }
 
 /** How to start vpn-server with its one-time token, next to this VPN or on another host. */
 function EnrollCommand({ added, version, onDone }: { added: NewServer; version?: string; onDone: () => void }) {
+  const t = useT();
   const here = window.location.origin;
   const { id } = added.server;
   return (
@@ -25,31 +27,30 @@ function EnrollCommand({ added, version, onDone }: { added: NewServer; version?:
       size="lg"
       icon={<Check aria-hidden className="size-4" />}
       iconTone="success"
-      title={`Start ${id} with this one-time token`}
-      description={`It works once, until ${new Date(added.enrollExpiresAt).toLocaleString()}, and is not shown again.`}
+      title={t("servers.startTitle", { id })}
+      description={t("servers.worksOnce", { date: new Date(added.enrollExpiresAt).toLocaleString() })}
       footer={
         <Button variant="primary" onClick={onDone}>
-          Done
+          {t("common.done")}
         </Button>
       }
     >
       <span className="flex flex-col gap-2">
-        <span>On the host clients connect to{added.server.address ? ` (${added.server.address})` : ""}:</span>
-        <Code label={`Start ${id}`}>
+        <span>{added.server.address ? t("servers.onHostAt", { address: added.server.address }) : t("servers.onHost")}</span>
+        <Code label={t("servers.startLabel", { id })}>
           {`docker run -d --name vpn-server --restart unless-stopped \\
   --cap-add NET_ADMIN --device /dev/net/tun --sysctl net.ipv4.ip_forward=1 \\
   -p 1194:1194/udp -v vpn-server-data:/var/lib/openasy-vpn \\
   -e VPN_URL=${here} -e VPN_ENROLL_TOKEN=${added.enrollToken} \\
-  ghcr.io/openasy/vpn-server:${version ?? "<the version of this VPN>"}`}
+  ghcr.io/openasy/vpn-server:${version ?? t("servers.thisVersion")}`}
         </Code>
         <span>
-          Keep the volume: the server's secret is in it. For TCP 443, add <code>-p 443:443/tcp -e OPENVPN_PROTO=tcp -e OPENVPN_PORT=443</code> instead of the UDP port. Next to this VPN with its compose file, set the token in the server's
-          variable, for example <code>EDGE_1_TOKEN=…&nbsp;docker compose up -d</code>.
+          {t("servers.keepVolume")} <code>-p 443:443/tcp -e OPENVPN_PROTO=tcp -e OPENVPN_PORT=443</code> {t("servers.insteadOfUdp")} <code>EDGE_1_TOKEN=…&nbsp;docker compose up -d</code>.
         </span>
-        <span>Client configs list a server once it has reported. Devices added before that do not know it; they keep using the servers they have.</span>
+        <span>{t("servers.clientConfigs")}</span>
       </span>
-      <Callout tone="warning" title="Closing this dialog hides the token">
-        If it is lost, enrol the server again from its row.
+      <Callout tone="warning" title={t("servers.closingHides")}>
+        {t("servers.closingHidesBody")}
       </Callout>
     </Dialog>
   );
@@ -57,9 +58,10 @@ function EnrollCommand({ added, version, onDone }: { added: NewServer; version?:
 
 export function ServersPage({ call, version }: { call: Call; version?: string }) {
   const { can } = useAuth();
+  const t = useT();
   const { data, reload } = useData<{ servers: Server[] }>(call, "/api/v1/servers", 10_000);
   const servers = data?.servers;
-  const up = (servers ?? []).filter((s) => state(s).tone === "success").length;
+  const up = (servers ?? []).filter((s) => state(t, s).tone === "success").length;
   const [id, setId] = useState("");
   const [address, setAddress] = useState("");
   const [added, setAdded] = useState<NewServer>();
@@ -77,41 +79,41 @@ export function ServersPage({ call, version }: { call: Call; version?: string })
     });
   };
   const editAddress = (s: Server) => {
-    const next = window.prompt(`Address clients connect to for ${s.id}. Leave empty to use VPN_PUBLIC_HOST. Client configs made before keep the old address.`, s.address ?? "");
+    const next = window.prompt(t("servers.promptAddress", { id: s.id }), s.address ?? "");
     if (next !== null) void action.run(() => call(`/api/v1/servers/${s.id}`, { method: "PATCH", body: JSON.stringify({ address: next.trim() || null }) }).then(reload));
   };
   const enrollAgain = (s: Server) =>
     window.confirm(
       s.legacy
-        ? `Enrol ${s.id} with its own secret? VPN_SERVER_TOKEN stops working for it now: start it again with the token you get next.`
-        : `Enrol ${s.id} again? Its secret stops working now, and it gets a new certificate once you start it with the new token.`,
+        ? t("servers.confirmEnrolLegacy", { id: s.id })
+        : t("servers.confirmEnrolAgain", { id: s.id }),
     ) && void action.run(async () => (setAdded(await call<NewServer>(`/api/v1/servers/${s.id}/enroll-token`, { method: "POST" })), reload()));
   const remove = (s: Server) =>
-    window.confirm(`Remove ${s.id}? It stops getting its config and its sessions end. Client configs that list it skip to the next server.`) &&
+    window.confirm(t("servers.confirmRemove", { id: s.id })) &&
     void action.run(() => call(`/api/v1/servers/${s.id}`, { method: "DELETE" }).then(reload));
 
   const columns: Column<Server>[] = [
     {
       id: "id",
-      header: "Server",
+      header: t("common.server"),
       cell: (s) => (
         <span className="flex items-center gap-2">
           {s.id}
           {s.legacy && (
-            <Badge tone="warning" title="Uses the shared VPN_SERVER_TOKEN. Enrol it to give it its own secret.">
-              Legacy
+            <Badge tone="warning" title={t("servers.legacyTitle")}>
+              {t("servers.legacy")}
             </Badge>
           )}
         </span>
       ),
       sortValue: (s) => s.id,
     },
-    { id: "state", header: "State", width: "170px", cell: (s) => <StatusBadge tone={state(s).tone}>{state(s).label}</StatusBadge> },
-    { id: "address", header: "Address", mono: true, cell: (s) => s.address ?? <span title="VPN_PUBLIC_HOST">default</span>, sortValue: (s) => s.address ?? "" },
-    { id: "listen", header: "Listens on", width: "110px", mono: true, cell: (s) => s.listen ?? (s.lastSeen ? "udp/1194" : "–") },
-    { id: "version", header: "Version", width: "90px", mono: true, cell: (s) => s.version ?? "–" },
-    { id: "config", header: "Config", width: "170px", mono: true, cell: (s) => s.configVersion ?? "not applied" },
-    { id: "seen", header: "Last heartbeat", width: "130px", cell: (s) => <span title={s.lastSeen ? new Date(s.lastSeen).toLocaleString() : undefined}>{ago(s.lastSeen)}</span>, sortValue: (s) => s.lastSeen ?? "" },
+    { id: "state", header: t("servers.state"), width: "170px", cell: (s) => <StatusBadge tone={state(t, s).tone}>{state(t, s).label}</StatusBadge> },
+    { id: "address", header: t("common.address"), mono: true, cell: (s) => s.address ?? <span title="VPN_PUBLIC_HOST">{t("servers.default")}</span>, sortValue: (s) => s.address ?? "" },
+    { id: "listen", header: t("servers.listensOn"), width: "110px", mono: true, cell: (s) => s.listen ?? (s.lastSeen ? "udp/1194" : "–") },
+    { id: "version", header: t("servers.version"), width: "90px", mono: true, cell: (s) => s.version ?? "–" },
+    { id: "config", header: t("servers.config"), width: "170px", mono: true, cell: (s) => s.configVersion ?? t("servers.notApplied") },
+    { id: "seen", header: t("servers.lastHeartbeat"), width: "130px", cell: (s) => <span title={s.lastSeen ? new Date(s.lastSeen).toLocaleString() : undefined}>{ago(t, s.lastSeen)}</span>, sortValue: (s) => s.lastSeen ?? "" },
     ...(can("admin")
       ? [
           {
@@ -121,13 +123,13 @@ export function ServersPage({ call, version }: { call: Call; version?: string })
             cell: (s: Server) => (
               <span className="flex gap-1">
                 <Button size="xs" variant="ghost" icon={<Pencil />} onClick={() => editAddress(s)}>
-                  Address
+                  {t("common.address")}
                 </Button>
                 <Button size="xs" variant="ghost" icon={<RotateCw />} onClick={() => enrollAgain(s)}>
-                  {s.legacy ? "Enrol" : "Enrol again"}
+                  {s.legacy ? t("servers.enrol") : t("servers.enrolAgain")}
                 </Button>
                 <Button size="xs" variant="ghost" icon={<Trash2 />} onClick={() => remove(s)}>
-                  Remove
+                  {t("common.remove")}
                 </Button>
               </span>
             ),
@@ -138,48 +140,48 @@ export function ServersPage({ call, version }: { call: Call; version?: string })
   return (
     <>
       <PageHeader
-        title="Servers"
-        description={`vpn-server runs OpenVPN on the hosts clients connect to, here or at other locations. Each pulls its config from here and reports every 15 seconds; client configs list every server, so clients move to the next one when one is down. It must have the same version as this VPN${version ? ` (${version})` : ""}.`}
+        title={t("servers.title")}
+        description={version ? `${t("servers.description")} ${t("servers.sameVersion", { version })}` : t("servers.description")}
         actions={
           can("admin") && (
             <Button variant="primary" icon={<Plus />} onClick={() => setAdding(true)}>
-              Add server
+              {t("servers.add")}
             </Button>
           )
         }
       />
       <KpiGrid>
-        <KpiCard label="Servers" value={servers?.length ?? "–"} />
-        <KpiCard label="Running" value={servers ? up : "–"} tone={servers && up < servers.length ? "warning" : "success"} />
+        <KpiCard label={t("servers.title")} value={servers?.length ?? "–"} />
+        <KpiCard label={t("servers.running")} value={servers ? up : "–"} tone={servers && up < servers.length ? "warning" : "success"} />
       </KpiGrid>
       <Dialog
         open={adding}
         onOpenChange={(open) => !open && close()}
-        title="Add a server"
-        description="Its address is the host name or IP clients connect to; leave it empty to use VPN_PUBLIC_HOST."
+        title={t("servers.addTitle")}
+        description={t("servers.addBody")}
         onSubmit={add}
         footer={
           <>
             <Button type="button" onClick={close}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button type="submit" variant="primary" loading={action.busy} disabled={!id}>
-              Add server
+              {t("servers.add")}
             </Button>
           </>
         }
       >
-        <Problem error={action.error} title="Not added" />
-        <TextField label="Name" value={id} onChange={(e) => setId(e.target.value.toLowerCase())} placeholder="fra-1" />
-        <TextField label="Address" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="fra.vpn.example.com" />
+        <Problem error={action.error} title={t("common.notAdded")} />
+        <TextField label={t("common.name")} value={id} onChange={(e) => setId(e.target.value.toLowerCase())} placeholder="fra-1" />
+        <TextField label={t("common.address")} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="fra.vpn.example.com" />
       </Dialog>
       {!adding && <Problem error={action.error} />}
       {added && <EnrollCommand added={added} version={version} onDone={() => setAdded(undefined)} />}
       {servers?.length === 0 ? (
-        <EmptyState title="No servers yet">Add one, then start vpn-server with its token; it shows up within 15 seconds.</EmptyState>
+        <EmptyState title={t("servers.noneYet")}>{t("servers.noneYetBody")}</EmptyState>
       ) : (
         <Panel flush>
-          <List label="Servers" rows={servers} columns={columns} empty="No servers yet" getRowId={(s) => s.id} />
+          <List label={t("servers.title")} rows={servers} columns={columns} empty={t("servers.noneYet")} getRowId={(s) => s.id} />
         </Panel>
       )}
     </>

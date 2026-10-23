@@ -3,18 +3,17 @@ import { useAuth } from "@openasy/auth/react";
 import { Pencil, Plus, Trash2, X } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import type { Group, IpGroup, IpNetwork } from "./api.ts";
+import { useT } from "./i18n.ts";
 import { List, Problem, useAction, useData, type Call } from "./shared.tsx";
 
 export function AccessPage({ call }: { call: Call }) {
+  const t = useT();
   const groups = useData<{ groups: Group[] }>(call, "/api/v1/groups", 0);
   const ipGroups = useData<{ ipGroups: IpGroup[] }>(call, "/api/v1/ip-groups", 0);
   const reload = () => (groups.reload(), ipGroups.reload());
   return (
     <>
-      <PageHeader
-        title="Access"
-        description="People are in groups; an IP group lists networks and ports and the groups that may reach them. A device gets routes to those networks only, and the server's firewall drops everything else from it."
-      />
+      <PageHeader title={t("access.title")} description={t("access.description")} />
       <IpGroups call={call} ipGroups={ipGroups.data?.ipGroups} groups={groups.data?.groups ?? []} onChange={reload} />
       <Groups call={call} groups={groups.data?.groups} onChange={reload} />
     </>
@@ -23,6 +22,7 @@ export function AccessPage({ call }: { call: Call }) {
 
 function Groups({ call, groups, onChange }: { call: Call; groups: Group[] | undefined; onChange: () => void }) {
   const { can } = useAuth();
+  const t = useT();
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const action = useAction();
@@ -32,8 +32,8 @@ function Groups({ call, groups, onChange }: { call: Call; groups: Group[] | unde
     if (await action.run(() => call("/api/v1/groups", { method: "POST", body: JSON.stringify({ name }) }))) (close(), onChange());
   };
   const columns: Column<Group>[] = [
-    { id: "name", header: "Group", cell: (g) => g.name, sortValue: (g) => g.name },
-    { id: "people", header: "People", width: "90px", align: "right", mono: true, cell: (g) => g.people, sortValue: (g) => g.people },
+    { id: "name", header: t("access.group"), cell: (g) => g.name, sortValue: (g) => g.name },
+    { id: "people", header: t("access.people"), width: "90px", align: "right", mono: true, cell: (g) => g.people, sortValue: (g) => g.people },
     ...(can("admin")
       ? [
           {
@@ -45,9 +45,9 @@ function Groups({ call, groups, onChange }: { call: Call; groups: Group[] | unde
                 size="xs"
                 variant="ghost"
                 icon={<Trash2 />}
-                onClick={() => window.confirm(`Remove the group ${g.name}? Its ${g.people} people lose the access it gave them.`) && void action.run(() => call(`/api/v1/groups/${g.id}`, { method: "DELETE" })).then(onChange)}
+                onClick={() => window.confirm(t("access.confirmRemoveGroup", { name: g.name, count: g.people })) && void action.run(() => call(`/api/v1/groups/${g.id}`, { method: "DELETE" })).then(onChange)}
               >
-                Remove
+                {t("common.remove")}
               </Button>
             ),
           } satisfies Column<Group>,
@@ -56,12 +56,12 @@ function Groups({ call, groups, onChange }: { call: Call; groups: Group[] | unde
   ];
   return (
     <Panel
-      title="Groups"
-      description="Add people to groups on their page."
+      title={t("common.groups")}
+      description={t("access.groupsBody")}
       actions={
         can("admin") && (
           <Button size="sm" icon={<Plus />} onClick={() => setAdding(true)}>
-            Add group
+            {t("access.addGroup")}
           </Button>
         )
       }
@@ -72,24 +72,24 @@ function Groups({ call, groups, onChange }: { call: Call; groups: Group[] | unde
         open={adding}
         onOpenChange={(open) => !open && close()}
         size="sm"
-        title="Add a group"
-        description="Add people to it on their page, and let it reach networks under IP groups."
+        title={t("access.addGroupTitle")}
+        description={t("access.addGroupBody")}
         onSubmit={add}
         footer={
           <>
             <Button type="button" onClick={close}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button type="submit" variant="primary" loading={action.busy} disabled={!name}>
-              Add group
+              {t("access.addGroup")}
             </Button>
           </>
         }
       >
-        <Problem error={action.error} title="Not added" />
-        <TextField label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Backend engineers" />
+        <Problem error={action.error} title={t("common.notAdded")} />
+        <TextField label={t("common.name")} value={name} onChange={(e) => setName(e.target.value)} placeholder={t("access.groupPlaceholder")} />
       </Dialog>
-      <List label="Groups" rows={groups} columns={columns} empty="No groups yet" getRowId={(g) => g.id} />
+      <List label={t("common.groups")} rows={groups} columns={columns} empty={t("access.noGroups")} getRowId={(g) => g.id} />
     </Panel>
   );
 }
@@ -98,13 +98,14 @@ const networkText = (n: IpNetwork) => `${n.cidr}${n.ports === "any" ? "" : ` ${n
 
 function IpGroups({ call, ipGroups, groups, onChange }: { call: Call; ipGroups: IpGroup[] | undefined; groups: Group[]; onChange: () => void }) {
   const { can } = useAuth();
+  const t = useT();
   const [editing, setEditing] = useState<IpGroup | "new">();
   const action = useAction();
   const columns: Column<IpGroup>[] = [
-    { id: "name", header: "IP group", cell: (g) => <span className="flex flex-wrap items-center gap-1">{g.name}{g.fullTunnel && <Badge tone="info">Full tunnel</Badge>}</span>, sortValue: (g) => g.name },
+    { id: "name", header: t("access.ipGroup"), cell: (g) => <span className="flex flex-wrap items-center gap-1">{g.name}{g.fullTunnel && <Badge tone="info">{t("access.fullTunnel")}</Badge>}</span>, sortValue: (g) => g.name },
     {
       id: "networks",
-      header: "Networks and ports",
+      header: t("access.networksAndPorts"),
       cell: (g) =>
         g.networks.length ? (
           <span className="flex flex-col gap-0.5 font-mono text-xs">
@@ -118,7 +119,7 @@ function IpGroups({ call, ipGroups, groups, onChange }: { call: Call; ipGroups: 
           "–"
         ),
     },
-    { id: "allowed", header: "Who may reach them", cell: (g) => (g.allowedGroups.length ? <span className="flex flex-wrap gap-1">{g.allowedGroups.map((n) => <Badge key={n}>{n}</Badge>)}</span> : "Nobody yet") },
+    { id: "allowed", header: t("access.whoMayReach"), cell: (g) => (g.allowedGroups.length ? <span className="flex flex-wrap gap-1">{g.allowedGroups.map((n) => <Badge key={n}>{n}</Badge>)}</span> : t("access.nobodyYet")) },
     ...(can("admin")
       ? [
           {
@@ -128,15 +129,15 @@ function IpGroups({ call, ipGroups, groups, onChange }: { call: Call; ipGroups: 
             cell: (g: IpGroup) => (
               <span className="flex gap-1">
                 <Button size="xs" variant="ghost" icon={<Pencil />} onClick={() => setEditing(g)}>
-                  Edit
+                  {t("common.edit")}
                 </Button>
                 <Button
                   size="xs"
                   variant="ghost"
                   icon={<Trash2 />}
-                  onClick={() => window.confirm(`Remove the IP group ${g.name}? Devices lose the routes and firewall rules it gave them.`) && void action.run(() => call(`/api/v1/ip-groups/${g.id}`, { method: "DELETE" })).then(onChange)}
+                  onClick={() => window.confirm(t("access.confirmRemoveIpGroup", { name: g.name })) && void action.run(() => call(`/api/v1/ip-groups/${g.id}`, { method: "DELETE" })).then(onChange)}
                 >
-                  Remove
+                  {t("common.remove")}
                 </Button>
               </span>
             ),
@@ -148,25 +149,26 @@ function IpGroups({ call, ipGroups, groups, onChange }: { call: Call; ipGroups: 
     <>
       {editing && <IpGroupEditor key={editing === "new" ? "new" : editing.id} call={call} ipGroup={editing === "new" ? undefined : editing} groups={groups} onDone={(changed) => (setEditing(undefined), changed && onChange())} />}
       <Panel
-        title="IP groups"
-        description="Servers apply a change within one heartbeat, without disconnecting anyone."
+        title={t("access.ipGroups")}
+        description={t("access.ipGroupsBody")}
         actions={
           can("admin") && (
             <Button size="sm" icon={<Plus />} onClick={() => setEditing("new")}>
-              Add IP group
+              {t("access.addIpGroup")}
             </Button>
           )
         }
         flush
       >
         <Problem error={action.error} />
-        <List label="IP groups" rows={ipGroups} columns={columns} empty="No IP groups yet: devices connect but reach nothing" getRowId={(g) => g.id} />
+        <List label={t("access.ipGroups")} rows={ipGroups} columns={columns} empty={t("access.noIpGroups")} getRowId={(g) => g.id} />
       </Panel>
     </>
   );
 }
 
 function IpGroupEditor({ call, ipGroup, groups, onDone }: { call: Call; ipGroup?: IpGroup; groups: Group[]; onDone: (changed: boolean) => void }) {
+  const t = useT();
   const [name, setName] = useState(ipGroup?.name ?? "");
   const [fullTunnel, setFullTunnel] = useState(ipGroup?.fullTunnel ?? false);
   const [networks, setNetworks] = useState<IpNetwork[]>(ipGroup?.networks.length ? ipGroup.networks : [{ cidr: "", ports: "any", note: "" }]);
@@ -186,43 +188,43 @@ function IpGroupEditor({ call, ipGroup, groups, onDone }: { call: Call; ipGroup?
       open
       onOpenChange={(open) => !open && onDone(false)}
       size="lg"
-      title={ipGroup ? `Edit ${ipGroup.name}` : "Add an IP group"}
-      description="Networks and ports, and the groups that may reach them."
+      title={ipGroup ? t("access.editOne", { name: ipGroup.name }) : t("access.addIpGroupTitle")}
+      description={t("access.editorBody")}
       onSubmit={submit}
       footer={
         <>
           <Button type="button" onClick={() => onDone(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button type="submit" variant="primary" loading={action.busy} disabled={!ipGroup && !name}>
-            {ipGroup ? "Save" : "Add IP group"}
+            {ipGroup ? t("common.save") : t("access.addIpGroup")}
           </Button>
         </>
       }
     >
-      <Problem error={action.error} title="Not saved" />
-      {!ipGroup && <TextField label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Production databases" />}
+      <Problem error={action.error} title={t("common.notSaved")} />
+      {!ipGroup && <TextField label={t("common.name")} value={name} onChange={(e) => setName(e.target.value)} placeholder={t("access.ipGroupPlaceholder")} />}
       <fieldset className="flex flex-col gap-2">
-        <legend className="mb-2 text-sm font-medium">Networks</legend>
+        <legend className="mb-2 text-sm font-medium">{t("access.networks")}</legend>
         {networks.map((n, i) => (
           <div key={i} className="flex flex-wrap items-end gap-2">
-            <TextField label="Network" mono value={n.cidr} onChange={(e) => set(i, { cidr: e.target.value })} placeholder="172.16.20.0/24" />
-            <TextField label="Ports" mono value={n.ports} onChange={(e) => set(i, { ports: e.target.value })} placeholder="tcp/5432, udp/53 or any" />
-            <TextField label="Note" value={n.note} onChange={(e) => set(i, { note: e.target.value })} placeholder="Postgres primary" />
-            <Button type="button" size="sm" variant="ghost" icon={<X />} aria-label={`Remove network ${i + 1}`} onClick={() => setNetworks(networks.filter((_, j) => j !== i))}>
-              Remove
+            <TextField label={t("access.network")} mono value={n.cidr} onChange={(e) => set(i, { cidr: e.target.value })} placeholder="172.16.20.0/24" />
+            <TextField label={t("access.ports")} mono value={n.ports} onChange={(e) => set(i, { ports: e.target.value })} placeholder={t("access.portsPlaceholder")} />
+            <TextField label={t("access.note")} value={n.note} onChange={(e) => set(i, { note: e.target.value })} placeholder={t("access.notePlaceholder")} />
+            <Button type="button" size="sm" variant="ghost" icon={<X />} aria-label={t("access.removeNetwork", { n: i + 1 })} onClick={() => setNetworks(networks.filter((_, j) => j !== i))}>
+              {t("common.remove")}
             </Button>
           </div>
         ))}
         <div>
           <Button type="button" size="sm" icon={<Plus />} onClick={() => setNetworks([...networks, { cidr: "", ports: "any", note: "" }])}>
-            Add network
+            {t("access.addNetwork")}
           </Button>
         </div>
       </fieldset>
-      <Switch checked={fullTunnel} onCheckedChange={setFullTunnel} label="Full tunnel" description="Send all of the device's traffic through the VPN, not only these networks. Use it where traffic must leave from the office address." />
+      <Switch checked={fullTunnel} onCheckedChange={setFullTunnel} label={t("access.fullTunnel")} description={t("access.fullTunnelBody")} />
       <fieldset className="flex flex-col gap-2">
-        <legend className="mb-2 text-sm font-medium">Groups that may reach these networks</legend>
+        <legend className="mb-2 text-sm font-medium">{t("access.allowedGroups")}</legend>
         {groups.length ? (
           <div className="flex flex-wrap gap-3">
             {groups.map((g) => (
@@ -230,7 +232,7 @@ function IpGroupEditor({ call, ipGroup, groups, onDone }: { call: Call; ipGroup?
             ))}
           </div>
         ) : (
-          <span className="text-sm text-fg-muted">Add a group below first.</span>
+          <span className="text-sm text-fg-muted">{t("access.addGroupFirst")}</span>
         )}
       </fieldset>
     </Dialog>
