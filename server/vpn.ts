@@ -1,11 +1,12 @@
 // The VPN's data: people, groups, IP groups, devices and what each vpn-server must run.
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID, X509Certificate } from "node:crypto";
+import { isIPv4, isIPv6 } from "node:net";
 import type { DatabaseSync } from "node:sqlite";
 import { clientAddresses, formatCidr, formatIp, parseCidr, parseIp, parsePorts, type Cidr } from "./net.ts";
 import type { Keyring } from "./kek.ts";
-import { crl, createCa, issue, tlsCryptKey, type Ca } from "./pki.ts";
+import { crl, createCa, createInternalCa, issue, issueFor, issueServer, readCsr, tlsCryptKey, type Ca } from "./pki.ts";
 
-type VpnErrorCode = "invalid-body" | "not-found" | "conflict" | "invalid-token";
+type VpnErrorCode = "invalid-body" | "not-found" | "conflict" | "invalid-token" | "not-configured";
 
 export class VpnError extends Error {
   readonly status: number;
@@ -28,6 +29,9 @@ const ENROLL_TTL_MS = 7 * 864e5;
 export const SERVER_OFFLINE_MS = 60_000;
 export const SERVER_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
 /** A host name or IPv4 address clients connect to. */
+// The internal domain and its names (ADR 0054): lower-case labels; a name is one or more labels under the domain.
+const DOMAIN = /^(?=.{1,200}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/;
+const LABELS = /^(?=.{1,120}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/;
 const ADDRESS = /^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$/;
 
 export interface Person {
@@ -56,6 +60,8 @@ export interface IpGroup {
   id: string;
   name: string;
   fullTunnel: boolean;
+  /** Devices that reach this group resolve the install's internal names (ADR 0054); off for any of them turns it off. */
+  internalNames: boolean;
   networks: IpNetwork[];
   allowedGroups: string[];
 }
@@ -68,6 +74,33 @@ export interface Device {
   notAfter: string;
   createdAt: string;
   revokedAt: string | null;
+  /** Resolves the install's internal names, unless turned off for this device (ADR 0054). */
+  internalNames: boolean;
+}
+
+/** A name in the install's internal domain, served by every vpn-server to devices (ADR 0054). */
+export interface InternalName {
+  id: string;
+  /** Relative to the domain: web, or grafana.apps. */
+  name: string;
+  /** The name with the domain, such as web.internal.yr. */
+  fqdn: string;
+  type: "A" | "AAAA" | "CNAME";
+  value: string;
+  createdAt: string;
+}
+
+/** The internal CA's root and what it issued (ADR 0054). */
+export interface InternalCa {
+  domain: string | null;
+  root: { certificate: string; subject: string; fingerprint: string; notAfter: string } | null;
+  certificates: InternalCertificate[];
+}
+export interface InternalCertificate {
+  serial: string;
+  names: string[];
+  notAfter: string;
+  createdAt: string;
 }
 
 /** What one OpenVPN server runs. The agent applies it and reports `version` back. */
@@ -79,7 +112,9 @@ export interface ServerConfig {
   key: string;
   crl: string;
   tlsCrypt: string;
-  clients: Array<{ cn: string; ip: string; routes: string[]; fullTunnel: boolean; allow: Allow[] }>;
+  clients: Array<{ cn: string; ip: string; routes: string[]; fullTunnel: boolean; allow: Allow[]; dns?: boolean }>;
+  /** The internal domain and its names, when the install has one (ADR 0054). */
+  dns?: { domain: string; records: Array<{ name: string; type: InternalName["type"]; value: string }>; forward: boolean };
 }
 
 /** One firewall rule: traffic from a device to `cidr`, on these ports (empty: every port). */
@@ -154,6 +189,13 @@ export interface VpnOptions {
   network: string;
   /** Host name or IP clients connect to, for servers that have no address of their own. */
   publicHost?: string;
+  /** The install's internal domain, such as internal.yr (ADR 0054); without it no names are served. */
+  dnsDomain?: string;
+  /**
+   * Split-horizon: names in the domain with no record here are asked of the servers' upstream resolvers, so the
+   * domain's public names keep working on the VPN. Off for a domain that exists only inside. On unless false.
+   */
+  dnsForward?: boolean;
   /** This release; a server of another version is shown as such (ADR 0019). */
   version?: string;
   /** Seals the CA key, the tls-crypt key and server keys in the database (ADR 0021). */
@@ -163,6 +205,8 @@ export interface VpnOptions {
 export function createVpn(db: DatabaseSync, opts: VpnOptions) {
   const network = parseCidr(opts.network);
   if (!network || network.prefix > 29) throw new Error(`VPN_NETWORK must be an IPv4 network of /29 or larger, not "${opts.network}"`);
+  const domain = opts.dnsDomain?.toLowerCase().replace(/\.$/, "");
+  if (domain !== undefined && !DOMAIN.test(domain)) throw new Error(`VPN_DNS_DOMAIN must be a domain name such as internal.yr, not "${opts.dnsDomain}"`);
 
   const setting = db.prepare("SELECT value FROM settings WHERE key = ?");
   const putSetting = db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value");
@@ -186,6 +230,14 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
       putSetting.run("ca_key", opts.keyring.seal(ca.key));
     }
     if (!get("tls_crypt")) putSetting.run("tls_crypt", opts.keyring.seal(tlsCryptKey()));
+    // The internal CA belongs to one domain, which its Name Constraints name: a new domain gets a new root.
+    if (domain && get("internal_ca_domain") !== domain) {
+      const internal = await createInternalCa(domain);
+      putSetting.run("internal_ca_cert", internal.cert);
+      putSetting.run("internal_ca_key", opts.keyring.seal(internal.key));
+      putSetting.run("internal_ca_domain", domain);
+      db.exec("DELETE FROM internal_certs");
+    }
     try {
       secret("ca_key");
     } catch {
@@ -209,6 +261,7 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
   }
 
   const ca = (): Ca => ({ cert: get("ca_cert")!, key: secret("ca_key") });
+  const internalRoot = () => (domain && get("internal_ca_domain") === domain ? get("internal_ca_cert") : undefined);
 
   // ---- groups -------------------------------------------------------------
 
@@ -307,7 +360,8 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
   // ---- IP groups ----------------------------------------------------------
 
   function ipGroup(id: string): IpGroup {
-    const row = db.prepare("SELECT id, name, full_tunnel FROM ip_groups WHERE id = ?").get(id) as { id: string; name: string; full_tunnel: number } | undefined;
+    const row = db.prepare("SELECT id, name, full_tunnel, internal_names FROM ip_groups WHERE id = ?").get(id) as
+      { id: string; name: string; full_tunnel: number; internal_names: number } | undefined;
     if (!row) throw notFound("IP group");
     const networks = db.prepare("SELECT cidr, ports, note FROM ip_group_networks WHERE ip_group_id = ? ORDER BY rowid").all(id) as unknown as IpNetwork[];
     const allowedGroups = (
@@ -315,7 +369,7 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
         name: string;
       }>
     ).map((g) => g.name);
-    return { id: row.id, name: row.name, fullTunnel: row.full_tunnel === 1, networks, allowedGroups };
+    return { id: row.id, name: row.name, fullTunnel: row.full_tunnel === 1, internalNames: row.internal_names === 1, networks, allowedGroups };
   }
 
   const listIpGroups = (): IpGroup[] => (db.prepare("SELECT id FROM ip_groups ORDER BY name").all() as Array<{ id: string }>).map((r) => ipGroup(r.id));
@@ -340,14 +394,20 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
     }
   }
 
-  function createIpGroup(body: { name?: unknown; fullTunnel?: unknown; networks?: unknown; allowedGroups?: unknown }): IpGroup {
+  function createIpGroup(body: { name?: unknown; fullTunnel?: unknown; internalNames?: unknown; networks?: unknown; allowedGroups?: unknown }): IpGroup {
     const name = typeof body.name === "string" ? body.name.trim() : "";
     if (!name || name.length > 100) throw invalid("name is required, at most 100 characters.");
     if (db.prepare("SELECT 1 FROM ip_groups WHERE name = ?").get(name)) throw new VpnError(409, "conflict", `An IP group named "${name}" exists.`);
     const id = randomUUID();
     db.exec("BEGIN");
     try {
-      db.prepare("INSERT INTO ip_groups (id, name, full_tunnel) VALUES (?, ?, ?)").run(id, name, body.fullTunnel === true ? 1 : 0);
+      if (body.internalNames !== undefined && typeof body.internalNames !== "boolean") throw invalid("internalNames must be true or false.");
+      db.prepare("INSERT INTO ip_groups (id, name, full_tunnel, internal_names) VALUES (?, ?, ?, ?)").run(
+        id,
+        name,
+        body.fullTunnel === true ? 1 : 0,
+        body.internalNames === false ? 0 : 1,
+      );
       writeIpGroup(id, { networks: body.networks ?? [], allowedGroups: body.allowedGroups ?? [] });
       db.exec("COMMIT");
     } catch (err) {
@@ -357,8 +417,12 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
     return ipGroup(id);
   }
 
-  function updateIpGroup(id: string, body: { fullTunnel?: unknown; networks?: unknown; allowedGroups?: unknown }): IpGroup {
+  function updateIpGroup(id: string, body: { fullTunnel?: unknown; internalNames?: unknown; networks?: unknown; allowedGroups?: unknown }): IpGroup {
     ipGroup(id);
+    if (body.internalNames !== undefined) {
+      if (typeof body.internalNames !== "boolean") throw invalid("internalNames must be true or false.");
+      db.prepare("UPDATE ip_groups SET internal_names = ? WHERE id = ?").run(body.internalNames ? 1 : 0, id);
+    }
     if (body.fullTunnel !== undefined) {
       if (typeof body.fullTunnel !== "boolean") throw invalid("fullTunnel must be true or false.");
       db.prepare("UPDATE ip_groups SET full_tunnel = ? WHERE id = ?").run(body.fullTunnel ? 1 : 0, id);
@@ -381,6 +445,7 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
     not_after: string;
     created_at: string;
     revoked_at: string | null;
+    internal_names: number;
   }): Device => ({
     id: r.id,
     personId: r.person_id,
@@ -389,6 +454,7 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
     notAfter: r.not_after,
     createdAt: r.created_at,
     revokedAt: r.revoked_at,
+    internalNames: r.internal_names === 1,
   });
 
   function listDevices(personId: string): Device[] {
@@ -430,6 +496,180 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
     );
     const device = toDevice(db.prepare("SELECT * FROM devices WHERE id = ?").get(id) as Parameters<typeof toDevice>[0]);
     return { device, ovpn: clientConfig(p.name, name, cert.cert, cert.key) };
+  }
+
+  function updateDevice(id: string, body: { internalNames?: unknown }): Device {
+    if (!db.prepare("SELECT 1 FROM devices WHERE id = ?").get(id)) throw notFound("Device");
+    if (body.internalNames !== undefined) {
+      if (typeof body.internalNames !== "boolean") throw invalid("internalNames must be true or false.");
+      db.prepare("UPDATE devices SET internal_names = ? WHERE id = ?").run(body.internalNames ? 1 : 0, id);
+    }
+    return toDevice(db.prepare("SELECT * FROM devices WHERE id = ?").get(id) as Parameters<typeof toDevice>[0]);
+  }
+
+  // ---- internal names (ADR 0054) ------------------------------------------
+
+  const fqdn = (name: string) => (name === "@" ? domain! : `${name}.${domain}`);
+  const toName = (r: { id: string; name: string; type: InternalName["type"]; value: string; created_at: string }): InternalName => ({
+    id: r.id,
+    name: r.name,
+    fqdn: domain ? fqdn(r.name) : r.name,
+    type: r.type,
+    value: r.value,
+    createdAt: r.created_at,
+  });
+
+  function internalNames(): { domain: string | null; forward: boolean; names: InternalName[] } {
+    const rows = db.prepare("SELECT * FROM internal_names ORDER BY name, type").all() as Parameters<typeof toName>[0][];
+    return { domain: domain ?? null, forward: opts.dnsForward !== false, names: rows.map(toName) };
+  }
+
+  function createInternalName(body: { name?: unknown; type?: unknown; value?: unknown }): InternalName {
+    if (!domain) throw new VpnError(409, "not-configured", "No internal domain: set VPN_DNS_DOMAIN, such as internal.yr, to serve internal names.");
+    const name = typeof body.name === "string" ? body.name.trim().toLowerCase().replace(/\.$/, "") : "";
+    const relative = name === domain ? "@" : name.endsWith(`.${domain}`) ? name.slice(0, -domain.length - 1) : name;
+    if (relative !== "@" && !LABELS.test(relative)) throw invalid(`"${name}" is not a name such as web or grafana.apps.`);
+    const type = body.type;
+    if (type !== "A" && type !== "AAAA" && type !== "CNAME") throw invalid("type is A, AAAA or CNAME.");
+    const value = typeof body.value === "string" ? body.value.trim().toLowerCase().replace(/\.$/, "") : "";
+    if (type === "A" && !isIPv4(value)) throw invalid(`"${value}" is not an IPv4 address.`);
+    if (type === "AAAA" && (!isIPv6(value) || value.includes("."))) throw invalid(`"${value}" is not an IPv6 address.`);
+    if (type === "CNAME" && (!DOMAIN.test(value) || value === fqdn(relative))) throw invalid(`"${value}" is not another host name.`);
+    const others = db.prepare("SELECT type FROM internal_names WHERE name = ?").all(relative) as Array<{ type: string }>;
+    // An alias stands alone: a name with a CNAME has no other record, and the domain itself has none (RFC 1034).
+    if ((type === "CNAME" && (others.length || relative === "@")) || others.some((o) => o.type === "CNAME"))
+      throw new VpnError(409, "conflict", `${fqdn(relative)} cannot have a CNAME and another record.`);
+    if (others.some((o) => o.type === type)) throw new VpnError(409, "conflict", `${fqdn(relative)} has an ${type} record already.`);
+    const id = randomUUID();
+    db.prepare("INSERT INTO internal_names (id, name, type, value, created_at) VALUES (?, ?, ?, ?, ?)").run(id, relative, type, value, now());
+    return toName(db.prepare("SELECT * FROM internal_names WHERE id = ?").get(id) as Parameters<typeof toName>[0]);
+  }
+
+  // ---- the internal CA (ADR 0054) -----------------------------------------
+
+  function internalCa(): InternalCa {
+    const pem = internalRoot();
+    const root = pem ? new X509Certificate(pem) : undefined;
+    const rows = db.prepare("SELECT serial, names, not_after, created_at FROM internal_certs ORDER BY created_at DESC").all() as Array<{
+      serial: string;
+      names: string;
+      not_after: string;
+      created_at: string;
+    }>;
+    return {
+      domain: domain ?? null,
+      root: root ? { certificate: pem!, subject: root.subject, fingerprint: root.fingerprint256, notAfter: new Date(root.validTo).toISOString() } : null,
+      certificates: rows.map((r) => ({ serial: r.serial, names: JSON.parse(r.names) as string[], notAfter: r.not_after, createdAt: r.created_at })),
+    };
+  }
+
+  /** The root a device installs once, or undefined without a domain. */
+  const internalRootPem = () => {
+    const pem = internalRoot();
+    return pem && `${pem.trimEnd()}\n`;
+  };
+
+  /** A certificate and its key for names under the domain. The key is returned once and never kept. */
+  async function issueInternal(body: { names?: unknown; days?: unknown }, by?: string) {
+    const pem = internalRoot();
+    if (!domain || !pem) throw new VpnError(409, "not-configured", "No internal domain: set VPN_DNS_DOMAIN, such as internal.yr, to issue certificates.");
+    if (!Array.isArray(body.names) || body.names.length === 0 || body.names.length > 20)
+      throw invalid("names is a list of 1 to 20 host names under the internal domain.");
+    const names = [...new Set(body.names.map((n) => (typeof n === "string" ? n.trim().toLowerCase().replace(/\.$/, "") : "")))];
+    for (const n of names) {
+      const bare = n.startsWith("*.") ? n.slice(2) : n;
+      // The root could not vouch for anything else: browsers would refuse it, so it is refused here first.
+      if (!DOMAIN.test(bare) || !(bare === domain || bare.endsWith(`.${domain}`))) throw invalid(`"${n}" is not a name under ${domain}.`);
+    }
+    const days = body.days === undefined ? 90 : body.days;
+    if (!Number.isInteger(days) || (days as number) < 1 || (days as number) > 397) throw invalid("days is a whole number from 1 to 397, 90 when left out.");
+    const issued = await issueServer({ cert: pem, key: open(get("internal_ca_key")!) }, names, days as number);
+    db.prepare("INSERT INTO internal_certs (serial, names, not_after, created_at, created_by) VALUES (?, ?, ?, ?, ?)").run(
+      issued.serial,
+      JSON.stringify(names),
+      issued.notAfter,
+      now(),
+      by ?? null,
+    );
+    // Each PEM ends its line, so the chain is two blocks a web server reads, not one broken one.
+    const line = (p: string) => `${p.trimEnd()}\n`;
+    return {
+      serial: issued.serial,
+      names,
+      notAfter: issued.notAfter,
+      certificate: line(issued.cert),
+      chain: line(issued.cert) + line(pem),
+      key: line(issued.key),
+    };
+  }
+
+  // ---- ACME for the internal CA (ADR 0054) --------------------------------
+
+  /** A key an ACME client binds its account with (External Account Binding); the HMAC key is shown once. */
+  function createAcmeKey(body: { name?: unknown }) {
+    if (!domain || !internalRoot()) throw new VpnError(409, "not-configured", "No internal domain: set VPN_DNS_DOMAIN to use ACME.");
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    if (!name || name.length > 100) throw invalid('name is required, at most 100 characters, for example "Caddy on web-1".');
+    const id = `kid-${randomBytes(9).toString("base64url")}`;
+    const mac = randomBytes(32);
+    db.prepare("INSERT INTO acme_keys (id, name, mac_key, created_at) VALUES (?, ?, ?, ?)").run(id, name, opts.keyring.seal(mac.toString("base64url")), now());
+    return { id, name, hmacKey: mac.toString("base64url") };
+  }
+
+  const listAcmeKeys = () =>
+    (
+      db.prepare("SELECT id, name, created_at, last_used_at FROM acme_keys ORDER BY created_at").all() as Array<{
+        id: string;
+        name: string;
+        created_at: string;
+        last_used_at: string | null;
+      }>
+    ).map((k) => ({ id: k.id, name: k.name, createdAt: k.created_at, lastUsedAt: k.last_used_at }));
+
+  /** Removing a key closes the accounts bound with it: their clients stop getting certificates. */
+  function deleteAcmeKey(id: string) {
+    if (db.prepare("DELETE FROM acme_keys WHERE id = ?").run(id).changes === 0) throw notFound("ACME key");
+    db.prepare("UPDATE acme_accounts SET status = 'deactivated' WHERE key_id = ?").run(id);
+  }
+
+  /** What the ACME server needs from here: the domain, internal addresses, binding keys and issuing. */
+  const acmeOptions = () => ({
+    domain: () => (domain && internalRoot() ? domain : undefined),
+    addresses: (name: string) => {
+      let at = name === domain ? "@" : name.slice(0, -(domain!.length + 1));
+      // Follow aliases inside the zone, a few steps at most.
+      for (let i = 0; i < 5; i++) {
+        const rows = db.prepare("SELECT type, value FROM internal_names WHERE name = ?").all(at) as Array<{ type: string; value: string }>;
+        const alias = rows.find((r) => r.type === "CNAME");
+        if (!alias) return rows.filter((r) => r.type === "A" || r.type === "AAAA").map((r) => r.value);
+        if (!(alias.value === domain || alias.value.endsWith(`.${domain}`))) return [];
+        at = alias.value === domain ? "@" : alias.value.slice(0, -(domain!.length + 1));
+      }
+      return [];
+    },
+    macKey: (kid: string) => {
+      const row = db.prepare("SELECT mac_key FROM acme_keys WHERE id = ?").get(kid) as { mac_key: string } | undefined;
+      return row ? Buffer.from(open(row.mac_key), "base64url") : undefined;
+    },
+    issue: async (csr: Uint8Array, names: string[]): Promise<{ chain: string } | { error: string }> => {
+      const read = await readCsr(csr);
+      if (!read) return { error: "The CSR is not a signed PKCS#10 request." };
+      if ([...read.names].sort().join(",") !== [...names].sort().join(","))
+        return { error: `The CSR names ${read.names.join(", ") || "nothing"}; the order is for ${names.join(", ")}.` };
+      const pem = internalRoot()!;
+      const issued = await issueFor({ cert: pem, key: open(get("internal_ca_key")!) }, read.publicKey, names, 90);
+      db.prepare("INSERT INTO internal_certs (serial, names, not_after, created_at, created_by) VALUES (?, ?, ?, ?, 'acme')").run(
+        issued.serial,
+        JSON.stringify(names),
+        issued.notAfter,
+        now(),
+      );
+      return { chain: `${issued.cert.trimEnd()}\n${pem.trimEnd()}\n` };
+    },
+  });
+
+  function deleteInternalName(id: string) {
+    if (db.prepare("DELETE FROM internal_names WHERE id = ?").run(id).changes === 0) throw notFound("Internal name");
   }
 
   function revokeDevice(id: string): Device {
@@ -494,19 +734,19 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
   function clientRules(): ServerConfig["clients"] {
     const rows = db
       .prepare(
-        `SELECT d.id AS cn, d.vpn_ip AS ip, d.person_id FROM devices d JOIN people p ON p.id = d.person_id
+        `SELECT d.id AS cn, d.vpn_ip AS ip, d.person_id, d.internal_names FROM devices d JOIN people p ON p.id = d.person_id
          WHERE d.revoked_at IS NULL AND p.status = 'active' AND d.not_after > ? ORDER BY d.vpn_ip`,
       )
-      .all(now()) as Array<{ cn: string; ip: string; person_id: string }>;
+      .all(now()) as Array<{ cn: string; ip: string; person_id: string; internal_names: number }>;
     return rows.map((r) => {
       const groups = db
         .prepare(
-          `SELECT DISTINCT ig.id, ig.full_tunnel FROM ip_groups ig
+          `SELECT DISTINCT ig.id, ig.full_tunnel, ig.internal_names FROM ip_groups ig
            JOIN ip_group_access a ON a.ip_group_id = ig.id
            JOIN person_groups pg ON pg.group_id = a.group_id
            WHERE pg.person_id = ?`,
         )
-        .all(r.person_id) as Array<{ id: string; full_tunnel: number }>;
+        .all(r.person_id) as Array<{ id: string; full_tunnel: number; internal_names: number }>;
       const routes = new Set<string>();
       const allow = new Map<string, Allow>();
       let fullTunnel = false;
@@ -522,7 +762,9 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
         }
       }
       const rules = [...allow.values()].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
-      return { cn: r.cn, ip: r.ip, routes: [...routes].sort(), fullTunnel, allow: rules };
+      // Only with a domain, so a config without one stays as it was and its version does not change.
+      const dns = domain ? { dns: r.internal_names === 1 && groups.every((g) => g.internal_names === 1) } : {};
+      return { cn: r.cn, ip: r.ip, routes: [...routes].sort(), fullTunnel, allow: rules, ...dns };
     });
   }
 
@@ -553,7 +795,25 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
       crlPem = await crl(ca(), revoked);
       putSetting.run("crl", JSON.stringify([crlKey, Date.now(), crlPem]));
     }
-    const body = { network: opts.network, ca: ca().cert, cert: row.cert, key: row.key, crl: crlPem, tlsCrypt: secret("tls_crypt"), clients: clientRules() };
+    const records = domain
+      ? (
+          db.prepare("SELECT name, type, value FROM internal_names ORDER BY name, type").all() as Array<{
+            name: string;
+            type: InternalName["type"];
+            value: string;
+          }>
+        ).map((r) => ({ name: fqdn(r.name), type: r.type, value: r.value }))
+      : [];
+    const body = {
+      network: opts.network,
+      ca: ca().cert,
+      cert: row.cert,
+      key: row.key,
+      crl: crlPem,
+      tlsCrypt: secret("tls_crypt"),
+      clients: clientRules(),
+      ...(domain && { dns: { domain, records, forward: opts.dnsForward !== false } }),
+    };
     const version = createHash("sha256").update(JSON.stringify(body)).digest("hex").slice(0, 16);
     return { version, ...body };
   }
@@ -785,6 +1045,17 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
     listDevices,
     createDevice,
     revokeDevice,
+    updateDevice,
+    internalNames,
+    createInternalName,
+    deleteInternalName,
+    internalCa,
+    internalRootPem,
+    issueInternal,
+    createAcmeKey,
+    listAcmeKeys,
+    deleteAcmeKey,
+    acmeOptions,
     serverConfig,
   };
 }

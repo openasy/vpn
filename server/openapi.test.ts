@@ -27,7 +27,7 @@ let base: string;
 const covered = new Set<string>();
 
 beforeAll(async () => {
-  app = await startApp({ version, openapi: spec, docsDir });
+  app = await startApp({ version, openapi: spec, docsDir, dnsDomain: "internal.yr" });
   base = app.base;
 });
 
@@ -175,6 +175,35 @@ describe("responses match openapi.json", () => {
     await call("PATCH", "/api/v1/ip-groups/{id}", admin({ fullTunnel: "yes" }), `/api/v1/ip-groups/${ip.id}`);
     await call("PATCH", "/api/v1/ip-groups/{id}", { ...admin(), body: "nope" }, `/api/v1/ip-groups/${ip.id}`);
     await call("PATCH", "/api/v1/ip-groups/{id}", admin({}), "/api/v1/ip-groups/missing");
+    await call("PATCH", "/api/v1/ip-groups/{id}", admin({ internalNames: false }), `/api/v1/ip-groups/${ip.id}`);
+    await call("PATCH", "/api/v1/ip-groups/{id}", admin({ internalNames: "no" }), `/api/v1/ip-groups/${ip.id}`);
+
+    // Internal names (ADR 0054).
+    const name = (await call("POST", "/api/v1/internal-names", admin({ name: "grafana", type: "A", value: "172.16.20.5" }))).body as { id: string };
+    await call("POST", "/api/v1/internal-names", admin({ name: "grafana.internal.yr", type: "A", value: "172.16.20.6" }));
+    await call("POST", "/api/v1/internal-names", admin({ name: "grafana", type: "CNAME", value: "web.internal.yr" }));
+    await call("POST", "/api/v1/internal-names", admin({ name: "bad name", type: "A", value: "172.16.20.5" }));
+    await call("POST", "/api/v1/internal-names", admin({ name: "web", type: "AAAA", value: "172.16.20.5" }));
+    await call("POST", "/api/v1/internal-names", { ...admin(), body: "nope" });
+    await call("GET", "/api/v1/internal-names", admin());
+    await call("DELETE", "/api/v1/internal-names/{id}", admin(), `/api/v1/internal-names/${name.id}`);
+    await call("DELETE", "/api/v1/internal-names/{id}", admin(), "/api/v1/internal-names/missing");
+
+    // The internal CA (ADR 0054).
+    await call("POST", "/api/v1/internal-ca/certificates", admin({ names: ["grafana.internal.yr", "*.apps.internal.yr"], days: 30 }));
+    await call("POST", "/api/v1/internal-ca/certificates", admin({ names: ["www.example.com"] }));
+    await call("POST", "/api/v1/internal-ca/certificates", admin({ names: ["web.internal.yr"], days: 900 }));
+    await call("POST", "/api/v1/internal-ca/certificates", { ...admin(), body: "nope" });
+    await call("GET", "/api/v1/internal-ca", admin());
+    await call("GET", "/api/v1/internal-ca/root.crt");
+    await call("GET", "/api/v1/internal-ca/root.crt", {}, "/api/v1/internal-ca/root.crt?format=der");
+    await call("GET", "/api/v1/internal-ca/root.mobileconfig");
+    const acmeKey = (await call("POST", "/api/v1/internal-ca/acme-keys", admin({ name: "Caddy on web-1" }))).body as { id: string };
+    await call("POST", "/api/v1/internal-ca/acme-keys", admin({ name: "" }));
+    await call("POST", "/api/v1/internal-ca/acme-keys", { ...admin(), body: "nope" });
+    await call("GET", "/api/v1/internal-ca/acme-keys", admin());
+    await call("DELETE", "/api/v1/internal-ca/acme-keys/{id}", admin(), `/api/v1/internal-ca/acme-keys/${acmeKey.id}`);
+    await call("DELETE", "/api/v1/internal-ca/acme-keys/{id}", admin(), "/api/v1/internal-ca/acme-keys/missing");
 
     const person = (await call("POST", "/api/v1/people", admin({ name: "Sarah Chen", email: "sarah@example.com", groups: ["SRE on-call"] }))).body as {
       id: string;
@@ -200,6 +229,10 @@ describe("responses match openapi.json", () => {
     await call("POST", "/api/v1/people/{id}/devices", admin({ name: "Phone" }), `/api/v1/people/${person.id}/devices`);
     await call("GET", "/api/v1/people/{id}/devices", admin(), `/api/v1/people/${person.id}/devices`);
     await call("GET", "/api/v1/people/{id}/devices", admin(), "/api/v1/people/missing/devices");
+    await call("PATCH", "/api/v1/devices/{id}", admin({ internalNames: false }), `/api/v1/devices/${device.device.id}`);
+    await call("PATCH", "/api/v1/devices/{id}", admin({ internalNames: "off" }), `/api/v1/devices/${device.device.id}`);
+    await call("PATCH", "/api/v1/devices/{id}", { ...admin(), body: "nope" }, `/api/v1/devices/${device.device.id}`);
+    await call("PATCH", "/api/v1/devices/{id}", admin({}), "/api/v1/devices/missing");
     await call("DELETE", "/api/v1/devices/{id}", admin(), `/api/v1/devices/${device.device.id}`);
     await call("DELETE", "/api/v1/devices/{id}", admin(), "/api/v1/devices/missing");
 

@@ -28,23 +28,25 @@ EDGE_1_TOKEN=ove_... EDGE_1_TCP_TOKEN=ove_... docker compose up -d
 ```
 
 [`compose.yaml`](./compose.yaml) starts `ghcr.io/openasy/vpn` and two `ghcr.io/openasy/vpn-server` servers, one on
-UDP 1194 and one on TCP 443. The UI and API are on http://localhost:8080; the API reference with *Try it out* is at
-http://localhost:8080/api/docs/ (click *Authorize* and paste an API token).
+UDP 1194 and one on TCP 443. The UI and API are on http://localhost:8080; the API reference with _Try it out_ is at
+http://localhost:8080/api/docs/ (click _Authorize_ and paste an API token).
 
-| Variable | Default | |
-| --- | --- | --- |
-| `PORT` | `8080` | HTTP port |
-| `VPN_DB` | `/data/vpn.db` | SQLite file (WAL), on the `/data` volume |
-| `VPN_PUBLIC_URL` | `http://localhost:8080` | The address people open, with `https://` behind your TLS proxy. Cookies, passkeys and OIDC redirects use it |
-| `OPENASY_PRODUCTS` | | The install's other OpenAsy products, for the product switcher: `identity=https://id.example.com,infrastructure=https://infra.example.com`. Give every product the same value |
-| `VPN_SERVER_TOKEN` | | Deprecated: one token for servers set up before 0.6.0, which never enrolled. Enrol them, then remove it |
-| `VPN_SECRETS_KEY_FILE` | `/run/secrets/openasy-kek` | 32-byte key-encryption key; required. It seals the CA key, server keys and sign-in secrets in the database (ADR 0021) |
-| `VPN_PASSWORD_SIGN_IN` | `true` | `false` when everyone signs in through OIDC |
-| `OPENASY_OIDC_*` | | Sign-in through your identity provider, the same names in every product, see [Sign-in](#sign-in) |
-| `VPN_ADMIN_TOKEN` | | Deprecated: one shared admin token without an expiry, for scripts from before sign-in. Use an API token |
-| `VPN_PUBLIC_HOST` | | Host name or IP clients connect to, for servers added without an address of their own |
-| `VPN_NETWORK` | `10.8.0.0/24` | Address pool for clients; each device gets a fixed address from it |
-| `VPN_HEADLESS` | `false` | `true` serves only the API |
+| Variable               | Default                    |                                                                                                                                                                               |
+| ---------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                 | `8080`                     | HTTP port                                                                                                                                                                     |
+| `VPN_DB`               | `/data/vpn.db`             | SQLite file (WAL), on the `/data` volume                                                                                                                                      |
+| `VPN_PUBLIC_URL`       | `http://localhost:8080`    | The address people open, with `https://` behind your TLS proxy. Cookies, passkeys and OIDC redirects use it                                                                   |
+| `OPENASY_PRODUCTS`     |                            | The install's other OpenAsy products, for the product switcher: `identity=https://id.example.com,infrastructure=https://infra.example.com`. Give every product the same value |
+| `VPN_SERVER_TOKEN`     |                            | Deprecated: one token for servers set up before 0.6.0, which never enrolled. Enrol them, then remove it                                                                       |
+| `VPN_SECRETS_KEY_FILE` | `/run/secrets/openasy-kek` | 32-byte key-encryption key; required. It seals the CA key, server keys and sign-in secrets in the database (ADR 0021)                                                         |
+| `VPN_PASSWORD_SIGN_IN` | `true`                     | `false` when everyone signs in through OIDC                                                                                                                                   |
+| `OPENASY_OIDC_*`       |                            | Sign-in through your identity provider, the same names in every product, see [Sign-in](#sign-in)                                                                              |
+| `VPN_ADMIN_TOKEN`      |                            | Deprecated: one shared admin token without an expiry, for scripts from before sign-in. Use an API token                                                                       |
+| `VPN_PUBLIC_HOST`      |                            | Host name or IP clients connect to, for servers added without an address of their own                                                                                         |
+| `VPN_NETWORK`          | `10.8.0.0/24`              | Address pool for clients; each device gets a fixed address from it                                                                                                            |
+| `VPN_DNS_DOMAIN`       |                            | Your domain for [internal names](#internal-names), such as `youreply.com.tr` or `internal.yr`. Unset, nothing changes                                                         |
+| `VPN_DNS_FORWARD`      | `true`                     | Split-horizon: names in the domain without a record here come from public DNS. `false` for a domain that exists only inside                                                   |
+| `VPN_HEADLESS`         | `false`                    | `true` serves only the API                                                                                                                                                    |
 
 ## Sign-in
 
@@ -122,6 +124,61 @@ Run vpn-server on a host at each location and add it under Servers with that hos
 command to start it. The hosts need to reach `vpn` over HTTPS and the networks their clients use. `vpn` never connects
 to them (ADR 0023).
 
+### Internal names
+
+With `VPN_DNS_DOMAIN` set, every vpn-server answers names under that domain to devices on the VPN, and to nobody else
+(ADR 0054). This is split-horizon DNS: the same domain has an inside view on the VPN and an outside view everywhere
+else. With your own domain, `logs.youreply.com.tr` resolves to `10.20.0.5` on the VPN and nowhere off it, while
+`www.youreply.com.tr` and your mail keep their public records on the VPN too: a name without a record here is asked of
+public DNS (`DNS_UPSTREAM` on each vpn-server). For a domain that exists only inside, such as `internal.yr`, set
+`VPN_DNS_FORWARD=false`. Add names under Access, Internal names: an IPv4 address (A), an IPv6 address (AAAA) or
+another host name (CNAME).
+
+- The server listens on the tunnel's first address, `10.8.0.1` for the default network, on port 53. It answers the
+  domain alone and refuses every other one, so it is never an open resolver; other domains go to the device's own
+  resolver. A name with a record here is answered from the inside view alone, for every type.
+- Devices get it with `dhcp-option DNS` and `DOMAIN-ROUTE`, and with `dns server ... resolve-domains` for OpenVPN 2.6
+  and later. OpenVPN Connect, Tunnelblick, Viscosity and the Windows client apply them; on Linux, `openvpn` needs
+  `systemd-resolved` and its `update-systemd-resolved` script, or NetworkManager.
+- It is on for every device. Turn it off for an IP group in its editor, or for one device on its person's page; those
+  devices keep the connection they have today.
+- Choose a subdomain of a domain you own, or one under `.internal`, which ICANN keeps for private use. A browser may
+  search for a name under a top-level domain it does not know the first time: type `https://` or keep a bookmark.
+
+### Internal certificates
+
+With `VPN_DNS_DOMAIN` set, `vpn` also runs an internal CA for that domain (ADR 0054), so a web server inside gets a
+certificate the browser accepts without a public name.
+
+- **Its root can sign nothing else.** It carries Name Constraints that allow names under the domain only and no IP
+  address, and it cannot make another CA below it. A device that trusts it trusts it for those names alone; a stolen
+  key cannot impersonate any other site. The key is sealed with `openasy-kek` (ADR 0021).
+- **Install the root once on each device**, or push it with your MDM: Access, Internal CA has it as a macOS and iOS
+  profile, a Windows `.cer` and a PEM, also at `/api/v1/internal-ca/root.mobileconfig` and
+  `/api/v1/internal-ca/root.crt` (`?format=der` for Windows) for anyone to fetch. OpenVPN cannot install it.
+- **Issue a certificate** under Access, Internal CA, or with `POST /api/v1/internal-ca/certificates`: names under the
+  domain, `*.name` for a wildcard, for 90 days unless you say otherwise, up to 397. The key is returned once and never
+  kept; serve the chain and the key from the web server.
+- **ACME:** Caddy, certbot and cert-manager inside get and renew certificates by themselves at `/acme/directory`
+  (RFC 8555). An account needs a key an admin makes under Access, Internal CA, ACME keys (External Account Binding),
+  so a device on the VPN cannot open one; the page shows the Caddyfile and certbot lines. A name is proved with
+  `http-01` at the address of its internal name, so the web server answers on port 80 there. Wildcards need `dns-01`,
+  which this does not offer: issue them by hand. Removing a key closes the accounts bound with it. Caddy takes a
+  directory over plain HTTP only at an internal name, such as `http://vpn.openasy.internal:8080/acme/directory` on
+  the same Docker network; give it `acme_ca_root` when the directory's own HTTPS certificate is from the internal CA.
+
+  ```caddyfile
+  {
+  	acme_ca https://vpn.youreply.com.tr/acme/directory
+  	acme_eab {
+  		key_id kid-...
+  		mac_key ...
+  	}
+  }
+  ```
+
+- Changing `VPN_DNS_DOMAIN` makes a new root for the new domain: install it again, and issue the certificates again.
+
 ## Command line
 
 `openasy-vpn` uses the same API as the UI, with an API token from Settings, API tokens; the token's role decides what
@@ -130,14 +187,14 @@ image without installing anything:
 
 ```bash
 export VPN_URL=https://vpn.example.com VPN_API_TOKEN=oa_vpn_...
-curl -LO https://github.com/openasy/vpn/releases/download/v0.9.0/openasy-vpn.ts
+curl -LO https://github.com/openasy/vpn/releases/download/v0.10.0/openasy-vpn.ts
 node openasy-vpn.ts help
 node openasy-vpn.ts sessions
 
 # Next to vpn, with compose.yaml: nothing to install, and VPN_URL is not needed
 docker compose exec -T -e VPN_API_TOKEN vpn /nodejs/bin/node cli/openasy-vpn.ts people
 # Anywhere with Docker
-docker run --rm -e VPN_URL -e VPN_API_TOKEN ghcr.io/openasy/vpn:0.9.0 cli/openasy-vpn.ts people
+docker run --rm -e VPN_URL -e VPN_API_TOKEN ghcr.io/openasy/vpn:0.10.0 cli/openasy-vpn.ts people
 ```
 
 `devices add` never overwrites a file; `--out -` prints the `.ovpn` instead, for example to pass it on in a pipe.
@@ -145,22 +202,27 @@ docker run --rm -e VPN_URL -e VPN_API_TOKEN ghcr.io/openasy/vpn:0.9.0 cli/openas
 
 ## Endpoints
 
-| Path | |
-| --- | --- |
-| `/healthz`, `/readyz` | Liveness and readiness |
-| `/metrics` | Prometheus metrics |
-| `GET /api/v1/version` | Product and version |
-| `GET /api/v1/products` | The other OpenAsy products, from `OPENASY_PRODUCTS` |
-| `GET /api/v1/servers`, `POST /api/v1/servers` | VPN servers; add one and get its enrolment token |
-| `PATCH`, `DELETE /api/v1/servers/{id}`, `POST /api/v1/servers/{id}/enroll-token` | Change a server's address, remove it, enrol it again |
-| `POST /api/v1/servers/enroll` | Used by vpn-server once: trades the enrolment token for its secret |
-| `POST /api/v1/servers/heartbeat` | Used by vpn-server |
-| `GET /api/v1/servers/{id}/config` | Used by vpn-server: what its OpenVPN must run |
-| `/api/v1/people`, `/api/v1/people/{id}/devices`, `/api/v1/devices/{id}` | People and their devices |
-| `/api/v1/groups`, `/api/v1/ip-groups` | Groups, and the networks each group may reach |
-| `GET /api/v1/sessions`, `DELETE /api/v1/sessions/{server}/{device}` | Devices connected now; end a session |
-| `/api/docs/` | Interactive API reference (Swagger UI), bundled in the image |
-| `/api/openapi.json` | OpenAPI 3.1 description |
+| Path                                                                             |                                                                                |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `/healthz`, `/readyz`                                                            | Liveness and readiness                                                         |
+| `/metrics`                                                                       | Prometheus metrics                                                             |
+| `GET /api/v1/version`                                                            | Product and version                                                            |
+| `GET /api/v1/products`                                                           | The other OpenAsy products, from `OPENASY_PRODUCTS`                            |
+| `GET /api/v1/servers`, `POST /api/v1/servers`                                    | VPN servers; add one and get its enrolment token                               |
+| `PATCH`, `DELETE /api/v1/servers/{id}`, `POST /api/v1/servers/{id}/enroll-token` | Change a server's address, remove it, enrol it again                           |
+| `POST /api/v1/servers/enroll`                                                    | Used by vpn-server once: trades the enrolment token for its secret             |
+| `POST /api/v1/servers/heartbeat`                                                 | Used by vpn-server                                                             |
+| `GET /api/v1/servers/{id}/config`                                                | Used by vpn-server: what its OpenVPN must run                                  |
+| `/api/v1/people`, `/api/v1/people/{id}/devices`, `/api/v1/devices/{id}`          | People and their devices; a device can turn internal names off                 |
+| `/api/v1/groups`, `/api/v1/ip-groups`                                            | Groups, and the networks each group may reach                                  |
+| `/api/v1/internal-names`                                                         | The names under `VPN_DNS_DOMAIN` that servers answer to devices                |
+| `/api/v1/internal-ca`, `/api/v1/internal-ca/certificates`                        | The internal CA, and certificates for names under the domain                   |
+| `GET /api/v1/internal-ca/root.crt`, `root.mobileconfig`                          | The root, for anyone to install                                                |
+| `/api/v1/internal-ca/acme-keys`                                                  | Keys ACME clients bind their accounts with                                     |
+| `/acme/directory`                                                                | ACME (RFC 8555) for the internal CA, with External Account Binding and http-01 |
+| `GET /api/v1/sessions`, `DELETE /api/v1/sessions/{server}/{device}`              | Devices connected now; end a session                                           |
+| `/api/docs/`                                                                     | Interactive API reference (Swagger UI), bundled in the image                   |
+| `/api/openapi.json`                                                              | OpenAPI 3.1 description                                                        |
 
 The description lives in [`openapi.json`](./openapi.json) and is the contract: `server/openapi.test.ts` calls every
 operation and fails if a response does not match it. Errors are RFC 9457 Problem Details
@@ -168,6 +230,11 @@ operation and fails if a response does not match it. Errors are RFC 9457 Problem
 https://openasy.github.io/products/vpn/api
 
 ## Upgrade
+
+### To 0.10.0
+
+- Nothing to change. Internal names, the internal CA and ACME are off until you set `VPN_DNS_DOMAIN` (ADR 0054);
+  vpn-server 0.10.0 serves them. The database migrates on start, with new tables for names, certificates and ACME.
 
 ### To 0.7.0
 
@@ -179,7 +246,7 @@ https://openasy.github.io/products/vpn/api
 ### To 0.6.0
 
 - Servers are added under Servers and enrol with their own token (ADR 0032). Servers that report with
-  `VPN_SERVER_TOKEN` keep working and are shown as *Legacy*. To move one, click *Enrol*, start it with
+  `VPN_SERVER_TOKEN` keep working and are shown as _Legacy_. To move one, click _Enrol_, start it with
   `VPN_ENROLL_TOKEN` and its state directory on a volume (`compose.yaml` adds `vpn-server-data`), then remove
   `VPN_SERVER_TOKEN` once no server is legacy. A later release removes `VPN_SERVER_TOKEN`.
 - An enrolled server cannot be reached with `VPN_SERVER_TOKEN`, and a server's secret fetches only its own config.
@@ -218,10 +285,10 @@ docker run --rm -v <project>_vpn-manager-data:/from -v <project>_vpn-data:/to al
 Images are signed with cosign (keyless), carry an SPDX SBOM attestation and SLSA level 3 provenance.
 
 ```bash
-cosign verify ghcr.io/openasy/vpn:0.9.0 \
+cosign verify ghcr.io/openasy/vpn:0.10.0 \
   --certificate-identity-regexp '^https://github.com/openasy/vpn/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-cosign verify-attestation --type spdxjson ghcr.io/openasy/vpn:0.9.0 \
+cosign verify-attestation --type spdxjson ghcr.io/openasy/vpn:0.10.0 \
   --certificate-identity-regexp '^https://github.com/openasy/vpn/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 slsa-verifier verify-image ghcr.io/openasy/vpn@sha256:<digest> --source-uri github.com/openasy/vpn

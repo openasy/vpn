@@ -12,11 +12,13 @@ export const ADMIN_TOKEN = "test-admin-token";
 
 export const KEK = Buffer.alloc(32, 7);
 
-export async function startApp(opts: Partial<AppOptions> & { version: string; publicHost?: string }) {
+export async function startApp(opts: Partial<AppOptions> & { version: string; publicHost?: string; dnsDomain?: string; dnsForward?: boolean }) {
   const db = openDb(":memory:");
   const vpn = createVpn(db, {
     network: "10.8.0.0/24",
     publicHost: "publicHost" in opts ? opts.publicHost : "vpn.example.com",
+    dnsDomain: opts.dnsDomain,
+    dnsForward: opts.dnsForward,
     version: opts.version,
     keyring: createKeyring(KEK),
   });

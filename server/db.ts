@@ -87,6 +87,52 @@ const MIGRATIONS = [
      SELECT id, 1, version, listen, openvpn_running, config_version, last_seen, last_seen FROM servers;
    DROP TABLE servers;
    ALTER TABLE servers_new RENAME TO servers`,
+  // 0.10.0: internal names (ADR 0054). A name is kept relative to the install's domain, so changing the domain keeps
+  // them; IP groups and devices may turn the names off, and both start with them on.
+  `CREATE TABLE internal_names (
+     id TEXT PRIMARY KEY,
+     name TEXT NOT NULL COLLATE NOCASE,
+     type TEXT NOT NULL,
+     value TEXT NOT NULL,
+     created_at TEXT NOT NULL,
+     UNIQUE (name, type)
+   );
+   ALTER TABLE ip_groups ADD COLUMN internal_names INTEGER NOT NULL DEFAULT 1;
+   ALTER TABLE devices ADD COLUMN internal_names INTEGER NOT NULL DEFAULT 1;
+   CREATE TABLE internal_certs (
+     serial TEXT PRIMARY KEY,
+     names TEXT NOT NULL,
+     not_after TEXT NOT NULL,
+     created_at TEXT NOT NULL,
+     created_by TEXT
+   );
+   CREATE TABLE acme_keys (id TEXT PRIMARY KEY, name TEXT NOT NULL, mac_key TEXT NOT NULL, created_at TEXT NOT NULL, last_used_at TEXT);
+   CREATE TABLE acme_accounts (
+     id TEXT PRIMARY KEY,
+     thumbprint TEXT NOT NULL UNIQUE,
+     jwk TEXT NOT NULL,
+     key_id TEXT NOT NULL,
+     status TEXT NOT NULL,
+     created_at TEXT NOT NULL
+   );
+   CREATE TABLE acme_orders (
+     id TEXT PRIMARY KEY,
+     account_id TEXT NOT NULL REFERENCES acme_accounts (id) ON DELETE CASCADE,
+     names TEXT NOT NULL,
+     status TEXT NOT NULL,
+     expires TEXT NOT NULL,
+     cert TEXT,
+     created_at TEXT NOT NULL
+   );
+   CREATE TABLE acme_authz (
+     id TEXT PRIMARY KEY,
+     order_id TEXT NOT NULL REFERENCES acme_orders (id) ON DELETE CASCADE,
+     name TEXT NOT NULL,
+     status TEXT NOT NULL,
+     token TEXT NOT NULL,
+     validated_at TEXT,
+     error TEXT
+   )`,
 ];
 
 /** Opens the product's single SQLite file in WAL mode (ADR 0011) and migrates it forward. */

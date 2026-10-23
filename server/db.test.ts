@@ -13,7 +13,7 @@ describe("openDb", () => {
     first.close();
 
     const second = openDb(path);
-    expect(second.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get()).toEqual({ n: 3 });
+    expect(second.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get()).toEqual({ n: 4 });
     second.close();
   });
 
@@ -24,6 +24,9 @@ describe("openDb", () => {
     old.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)");
     old.exec("CREATE TABLE servers (id TEXT PRIMARY KEY, version TEXT NOT NULL, listen TEXT, openvpn_running INTEGER NOT NULL, last_seen TEXT NOT NULL)");
     old.exec("ALTER TABLE servers ADD COLUMN config_version TEXT");
+    // The tables a later migration changes, as 0.5.0 had them.
+    old.exec("CREATE TABLE ip_groups (id TEXT PRIMARY KEY, name TEXT NOT NULL, full_tunnel INTEGER NOT NULL DEFAULT 0)");
+    old.exec("CREATE TABLE devices (id TEXT PRIMARY KEY)");
     old.exec("INSERT INTO schema_migrations VALUES (1, 'x'), (2, 'x')");
     old.exec("INSERT INTO servers VALUES ('edge-1', '0.5.0', 'udp/1194', 1, '2026-10-01T00:00:00.000Z', 'abc')");
     old.close();
