@@ -69,6 +69,11 @@ jobs:
           repository: openasy/vpn-server
           path: vpn-server
 
+      # vpn and vpn-server ship with one version (ADR 0019), and main of vpn-server keeps the last one until its release
+      # commit is pushed: give it this version, so the pair is tested as it will ship.
+      - name: Give vpn-server the version of vpn
+        run: cd vpn-server && npm pkg set version="$(node -p 'require("../vpn/package.json").version')"
+
       - name: Build both images
         run: |
           docker build -t vpn:dev vpn
