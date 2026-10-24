@@ -13,6 +13,7 @@ import {
   useThemePreference,
 } from "@openasy/ui";
 import { AccountSettings, AuthGate, MembersSettings, SignInSettings, TokensSettings, useAuth, useInstallBrand } from "@openasy/auth/react";
+import colophon from "virtual:openasy-colophon";
 import { Activity, KeyRound, LogIn, LogOut, Network, Server as ServerIcon, UserRound, Users, UsersRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type Person, type ProductLink, type Session } from "./api.ts";
@@ -23,7 +24,7 @@ import { ServersPage } from "./servers.tsx";
 import { SessionsPage } from "./sessions.tsx";
 import { useApi, useData } from "./shared.tsx";
 
-export const PAGES = ["people", "access", "sessions", "servers", "account", "members", "signin", "tokens"] as const;
+export const PAGES = ["people", "access", "sessions", "servers", "account", "members", "signin", "tokens", "about"] as const;
 type Page = (typeof PAGES)[number];
 type Route = { page: Page } | { page: "person"; id: string };
 
@@ -79,6 +80,7 @@ function Product() {
   return (
     <AppShell
       product="vpn"
+      about={colophon}
       nav={nav}
       activeNav={page === "person" ? "people" : page}
       onNavigate={(id) => navigate(`/${id}`)}
