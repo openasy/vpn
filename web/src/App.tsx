@@ -14,10 +14,11 @@ import {
 } from "@openasy/ui";
 import { AccountSettings, AuthGate, MembersSettings, SignInSettings, TokensSettings, useAccountMenu, useAuth, useInstallBrand } from "@openasy/auth/react";
 import colophon from "virtual:openasy-colophon";
-import { Activity, KeyRound, LogIn, LogOut, Network, Server as ServerIcon, UserRound, Users, UsersRound } from "lucide-react";
+import { Activity, KeyRound, LayoutDashboard, LogIn, LogOut, Network, Server as ServerIcon, UserRound, Users, UsersRound } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { api, type Person, type ProductLink, type Session } from "./api.ts";
 import { AccessPage } from "./access.tsx";
+import { OverviewPage } from "./overview.tsx";
 import { useT } from "./i18n.ts";
 import { search } from "./search.ts";
 import { PeoplePage, PersonPage } from "./people.tsx";
@@ -25,7 +26,7 @@ import { ServersPage } from "./servers.tsx";
 import { SessionsPage } from "./sessions.tsx";
 import { useApi, useData } from "./shared.tsx";
 
-export const PAGES = ["people", "access", "sessions", "servers", "account", "members", "signin", "tokens", "about"] as const;
+export const PAGES = ["overview", "people", "access", "sessions", "servers", "account", "members", "signin", "tokens", "about"] as const;
 type Page = (typeof PAGES)[number];
 type Route = { page: Page } | { page: "person"; id: string };
 
@@ -33,7 +34,7 @@ function parseRoute(path: string): Route {
   const [page, id] = path.replace(/^\//, "").split("/");
   if (page === "people" && id) return { page: "person", id: decodeURIComponent(id) };
   if ((PAGES as readonly string[]).includes(page ?? "")) return { page: page as Page };
-  return { page: "people" };
+  return { page: "overview" };
 }
 
 function Product() {
@@ -62,6 +63,7 @@ function Product() {
   }, [call]);
 
   const nav = [
+    { id: "overview", label: t("nav.overview"), icon: LayoutDashboard },
     { id: "people", label: t("nav.people"), icon: UsersRound, count: people.data?.people.length || undefined },
     { id: "access", label: t("nav.access"), icon: Network },
     { id: "sessions", label: t("nav.sessions"), icon: Activity, count: sessions.data?.sessions.length || undefined },
@@ -101,6 +103,8 @@ function Product() {
     >
       {route.page === "person" ? (
         <PersonPage key={route.id} call={call} id={route.id} />
+      ) : page === "overview" ? (
+        <OverviewPage call={call} />
       ) : page === "people" ? (
         <PeoplePage call={call} />
       ) : page === "access" ? (

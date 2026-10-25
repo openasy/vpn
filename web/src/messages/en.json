@@ -1,5 +1,6 @@
 {
   "nav": {
+    "overview": "Overview",
     "people": "People",
     "access": "Access",
     "sessions": "Sessions",
@@ -8,6 +9,29 @@
     "signin": "Sign-in",
     "tokens": "API tokens",
     "account": "Account"
+  },
+  "overview": {
+    "title": "Overview",
+    "description": "Who is connected now, how the servers are doing and what needs attention.",
+    "connectedNow": "Connected now",
+    "peopleOnline": "People online",
+    "ofActive": "of {{n}} active",
+    "serversOnline": "Servers online",
+    "ofServers": "of {{n}}",
+    "certificatesEnding": "Certificates ending",
+    "certificatesEndingDetail": "Devices whose certificate ends within 30 days. Add a new device for the person before it does.",
+    "ends": "Ends",
+    "startTitle": "Start with the people who connect",
+    "startBody": "Add a person and a device for them; the device gets a client config to import into OpenVPN.",
+    "addPeople": "Add people",
+    "sessionsPerHour": "Sessions per hour",
+    "sessionsPerHourDetail": "The most devices connected in each of the last 24 hours, over every server.",
+    "servers": "Servers",
+    "serversDetail": "Each server as of its last heartbeat.",
+    "serversCaption": "servers",
+    "online": "Online",
+    "connected": "connected",
+    "other": "Other"
   },
   "role": {
     "owner": "Owner",

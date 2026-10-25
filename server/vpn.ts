@@ -26,6 +26,12 @@ const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 const ENROLL_TTL_MS = 7 * 864e5;
 /** A server that has not reported for this long is offline; it reports every 15 seconds. */
 export const SERVER_OFFLINE_MS = 60_000;
+const HOUR = 3_600_000;
+/** How long the hourly session counts are kept. */
+const HISTORY_MS = 30 * 24 * HOUR;
+/** Devices whose certificate ends within this are listed on the overview. */
+const EXPIRING_MS = 30 * 24 * HOUR;
+const hourOf = (ms: number) => new Date(Math.floor(ms / HOUR) * HOUR).toISOString();
 export const SERVER_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
 /** A host name or IPv4 address clients connect to. */
 const ADDRESS = /^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$/;
@@ -709,6 +715,10 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
         "INSERT OR REPLACE INTO sessions (server_id, cn, real_address, vpn_ip, bytes_in, bytes_out, connected_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
       );
       for (const x of sessions) insert.run(serverId, x.cn, x.realAddress, x.vpnIp, x.bytesIn, x.bytesOut, x.connectedAt);
+      db.prepare(
+        "INSERT INTO session_hours (hour, server_id, sessions) VALUES (?, ?, ?) ON CONFLICT (hour, server_id) DO UPDATE SET sessions = MAX(sessions, excluded.sessions)",
+      ).run(hourOf(Date.now()), serverId, sessions.length);
+      db.prepare("DELETE FROM session_hours WHERE hour < ?").run(hourOf(Date.now() - HISTORY_MS));
       // A disconnect for a session that is gone is done.
       db.prepare("DELETE FROM pending_disconnects WHERE server_id = ? AND cn NOT IN (SELECT cn FROM sessions WHERE server_id = ?)").run(serverId, serverId);
       db.exec("COMMIT");
@@ -744,6 +754,58 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
     }));
   }
 
+  /** What the overview shows: people, devices, servers and sessions now, and sessions per hour over the last day. */
+  function overview(freshMs: number) {
+    const live = listSessions(freshMs);
+    const servers = listServers();
+    const status = (db.prepare("SELECT status, COUNT(*) AS n FROM people GROUP BY status").all() as Array<{ status: Person["status"]; n: number }>).reduce(
+      (acc, r) => ({ ...acc, [r.status]: r.n }),
+      { active: 0, suspended: 0 },
+    );
+    const soon = new Date(Date.now() + EXPIRING_MS).toISOString();
+    const devices = (db.prepare("SELECT COUNT(*) AS n FROM devices WHERE revoked_at IS NULL").get() as { n: number }).n;
+    const expiring = (
+      db
+        .prepare(
+          `SELECT d.id, d.name, d.not_after, p.id AS person_id, p.name AS person_name FROM devices d JOIN people p ON p.id = d.person_id
+           WHERE d.revoked_at IS NULL AND d.not_after < ? ORDER BY d.not_after LIMIT 8`,
+        )
+        .all(soon) as Array<Record<string, string>>
+    ).map((r) => ({ id: r.id!, name: r.name!, personId: r.person_id!, personName: r.person_name!, notAfter: r.not_after! }));
+
+    const first = Math.floor(Date.now() / HOUR) * HOUR - 23 * HOUR;
+    const hours = Array.from({ length: 24 }, (_, i) => hourOf(first + i * HOUR));
+    const perHour = new Map(
+      (db.prepare("SELECT hour, SUM(sessions) AS n FROM session_hours WHERE hour >= ? GROUP BY hour").all(hours[0]!) as Array<{ hour: string; n: number }>).map(
+        (r) => [r.hour, r.n],
+      ),
+    );
+
+    const byServer = new Map<string, number>();
+    const traffic = new Map<string, { id: string; name: string; personId: string | null; bytes: number }>();
+    for (const x of live) {
+      byServer.set(x.serverId, (byServer.get(x.serverId) ?? 0) + 1);
+      const key = x.personId ?? `device:${x.deviceId}`;
+      const t = traffic.get(key) ?? { id: key, name: x.personName ?? x.deviceName ?? x.deviceId, personId: x.personId, bytes: 0 };
+      traffic.set(key, { ...t, bytes: t.bytes + x.bytesIn + x.bytesOut });
+    }
+    return {
+      people: status,
+      devices: { active: devices, expiring },
+      sessions: live.length,
+      peopleOnline: new Set(live.map((x) => x.personId).filter(Boolean)).size,
+      servers: servers.reduce((acc, x) => ({ ...acc, [x.status]: acc[x.status] + 1 }), {
+        online: 0,
+        offline: 0,
+        "version-mismatch": 0,
+        "waiting-to-enrol": 0,
+      } as Record<Server["status"], number>),
+      hourly: { hours, sessions: hours.map((h) => perHour.get(h) ?? 0) },
+      byServer: [...byServer].map(([id, sessions]) => ({ id, sessions })).sort((a, b) => b.sessions - a.sessions),
+      traffic: [...traffic.values()].sort((a, b) => b.bytes - a.bytes).slice(0, 8),
+    };
+  }
+
   /** Asks the server to end a session at its next heartbeat. The device may connect again if it is still allowed. */
   function requestDisconnect(serverId: string, deviceId: string) {
     if (!db.prepare("SELECT 1 FROM sessions WHERE server_id = ? AND cn = ?").get(serverId, deviceId)) throw notFound("Session");
@@ -767,6 +829,7 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
     recordHeartbeat,
     recordSessions,
     listSessions,
+    overview,
     requestDisconnect,
     pendingDisconnects,
     listGroups,

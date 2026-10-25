@@ -1,4 +1,4 @@
-import { BarList, Button, PageHeader, Panel, type Column } from "@openasy/ui";
+import { Button, PageHeader, Panel, type Column } from "@openasy/ui";
 import { useAuth } from "@openasy/auth/react";
 import { Unplug } from "lucide-react";
 import type { Session } from "./api.ts";
@@ -78,43 +78,12 @@ export function SessionTable({ call, personId, sessions }: { call: Call; personI
   );
 }
 
-/** The largest totals first, eight at most. */
-function largest(totals: Map<string, { label: string; value: number; href?: string }>) {
-  return [...totals]
-    .map(([id, x]) => ({ id, ...x }))
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 8);
-}
-
 export function SessionsPage({ call }: { call: Call }) {
   const t = useT();
   const sessions = useData<{ sessions: Session[] }>(call, "/api/v1/sessions", 10_000);
-  const live = sessions.data?.sessions ?? [];
-  const traffic = new Map<string, { label: string; value: number; href?: string }>();
-  const servers = new Map<string, { label: string; value: number }>();
-  for (const s of live) {
-    const id = s.personId ?? `device:${s.deviceId}`;
-    const p = traffic.get(id) ?? {
-      label: s.personName ?? s.deviceName ?? t("sessions.unknownDevice"),
-      value: 0,
-      ...(s.personId && { href: `/people/${s.personId}` }),
-    };
-    traffic.set(id, { ...p, value: p.value + s.bytesIn + s.bytesOut });
-    servers.set(s.serverId, { label: s.serverId, value: (servers.get(s.serverId)?.value ?? 0) + 1 });
-  }
   return (
     <>
       <PageHeader title={t("sessions.title")} description={t("sessions.description")} />
-      {live.length > 0 && (
-        <div className="grid gap-3 lg:grid-cols-2">
-          <Panel title={t("sessions.trafficByPerson")} description={t("sessions.inAndOutSinceTheyConnected")}>
-            <BarList label={t("sessions.trafficByPerson")} items={largest(traffic)} format={bytes} />
-          </Panel>
-          <Panel title={t("sessions.sessionsByServer")} description={t("sessions.connectedNowToEachServer")}>
-            <BarList label={t("sessions.sessionsByServer")} items={largest(servers)} />
-          </Panel>
-        </div>
-      )}
       <Panel flush>
         <SessionTable call={call} sessions={sessions} />
       </Panel>

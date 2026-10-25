@@ -133,6 +133,13 @@ const MIGRATIONS = [
      validated_at TEXT,
      error TEXT
    )`,
+  // 0.13.0: the most sessions each server reported in each hour, for the overview. Thirty days are kept.
+  `CREATE TABLE session_hours (
+     hour TEXT NOT NULL,
+     server_id TEXT NOT NULL,
+     sessions INTEGER NOT NULL,
+     PRIMARY KEY (hour, server_id)
+   )`,
 ];
 
 /** Opens the product's single SQLite file in WAL mode (ADR 0011) and migrates it forward. */

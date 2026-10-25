@@ -271,6 +271,7 @@ export function createApp({ db, vpn, version, auth, serverToken, adminToken, web
 
     // Live sessions.
     { method: "GET", path: "/api/v1/sessions", auth: "viewer", handle: () => ({ sessions: vpn.listSessions(SESSION_FRESH_MS) }) },
+    { method: "GET", path: "/api/v1/overview", auth: "viewer", handle: () => vpn.overview(SESSION_FRESH_MS) },
     {
       method: "DELETE",
       path: "/api/v1/sessions/:server/:device",

@@ -1,4 +1,4 @@
-import { Badge, Button, Callout, Dialog, EmptyState, KpiCard, KpiGrid, PageHeader, Panel, StatusBadge, TextField, type Column } from "@openasy/ui";
+import { Badge, Button, Callout, Dialog, EmptyState, PageHeader, Panel, StatusBadge, TextField, type Column } from "@openasy/ui";
 import { useAuth } from "@openasy/auth/react";
 import { Check, Pencil, Plus, RotateCw, Trash2 } from "lucide-react";
 import { useState, type FormEvent } from "react";
@@ -62,7 +62,6 @@ export function ServersPage({ call, version }: { call: Call; version?: string })
   const t = useT();
   const { data, reload } = useData<{ servers: Server[] }>(call, "/api/v1/servers", 10_000);
   const servers = data?.servers;
-  const up = (servers ?? []).filter((s) => state(t, s).tone === "success").length;
   const [id, setId] = useState("");
   const [address, setAddress] = useState("");
   const [added, setAdded] = useState<NewServer>();
@@ -160,10 +159,6 @@ export function ServersPage({ call, version }: { call: Call; version?: string })
           )
         }
       />
-      <KpiGrid>
-        <KpiCard label={t("servers.title")} value={servers?.length ?? "–"} />
-        <KpiCard label={t("servers.running")} value={servers ? up : "–"} tone={servers && up < servers.length ? "warning" : "success"} />
-      </KpiGrid>
       <Dialog
         open={adding}
         onOpenChange={(open) => !open && close()}

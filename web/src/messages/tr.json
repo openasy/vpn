@@ -1,5 +1,6 @@
 {
   "nav": {
+    "overview": "Genel bakış",
     "people": "Kişiler",
     "access": "Erişim",
     "sessions": "Oturumlar",
@@ -8,6 +9,29 @@
     "signin": "Oturum açma",
     "tokens": "API token'ları",
     "account": "Hesap"
+  },
+  "overview": {
+    "title": "Genel bakış",
+    "description": "Şu an kimin bağlı olduğu, sunucuların durumu ve ilgilenilmesi gerekenler.",
+    "connectedNow": "Şu an bağlı",
+    "peopleOnline": "Çevrimiçi kişi",
+    "ofActive": "{{n}} etkin kişiden",
+    "serversOnline": "Çevrimiçi sunucu",
+    "ofServers": "{{n}} sunucudan",
+    "certificatesEnding": "Süresi dolan sertifikalar",
+    "certificatesEndingDetail": "Sertifikası 30 gün içinde dolacak cihazlar. Dolmadan kişiye yeni bir cihaz ekleyin.",
+    "ends": "Bitiş",
+    "startTitle": "Bağlanacak kişilerle başlayın",
+    "startBody": "Bir kişi ve ona bir cihaz ekleyin; cihaz OpenVPN'e aktarılacak bir istemci yapılandırması alır.",
+    "addPeople": "Kişi ekle",
+    "sessionsPerHour": "Saatlik oturumlar",
+    "sessionsPerHourDetail": "Son 24 saatin her birinde, tüm sunucularda aynı anda bağlı en fazla cihaz.",
+    "servers": "Sunucular",
+    "serversDetail": "Her sunucu, son heartbeat'ine göre.",
+    "serversCaption": "sunucu",
+    "online": "Çevrimiçi",
+    "connected": "bağlı",
+    "other": "Diğer"
   },
   "role": {
     "owner": "Sahip",

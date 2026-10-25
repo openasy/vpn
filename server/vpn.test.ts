@@ -367,6 +367,33 @@ describe("sessions", () => {
     expect(((await (await s.admin("/api/v1/sessions")).json()) as { sessions: unknown[] }).sessions).toEqual([]);
   });
 
+  it("sums the overview from live sessions and keeps the most per hour", async () => {
+    s.db.exec("DELETE FROM session_hours");
+    await beat([live(device.id), live("unknown-cn", { bytesIn: 5, bytesOut: 5 })]);
+    await beat([live(device.id)]);
+    const old = new Date(Date.now() - 31 * 86_400_000).toISOString();
+    s.db.prepare("INSERT INTO session_hours (hour, server_id, sessions) VALUES (?, 'edge-1', 9)").run(old);
+    await beat([live(device.id)]);
+    const o = (await (await s.admin("/api/v1/overview")).json()) as Record<string, any>;
+    expect(o.sessions).toBe(1);
+    expect(o.peopleOnline).toBe(1);
+    expect(o.people).toEqual({ active: 1, suspended: 0 });
+    expect(o.devices.active).toBe(1);
+    expect(o.devices.expiring).toEqual([]);
+    expect(o.servers.online).toBeGreaterThanOrEqual(1);
+    expect(o.hourly.sessions.at(-1)).toBe(2);
+    expect(o.hourly.sessions.slice(0, -1).every((n: number) => n === 0)).toBe(true);
+    expect(o.byServer).toEqual([{ id: "edge-1", sessions: 1 }]);
+    expect(o.traffic).toEqual([{ id: expect.any(String), name: "Dana Kim", personId: expect.any(String), bytes: 35200 }]);
+    expect(s.db.prepare("SELECT COUNT(*) AS n FROM session_hours WHERE hour = ?").get(old)).toEqual({ n: 0 });
+  });
+
+  it("lists devices whose certificate ends within 30 days", async () => {
+    s.db.prepare("UPDATE devices SET not_after = ? WHERE id = ?").run(new Date(Date.now() + 5 * 86_400_000).toISOString(), device.id);
+    const o = (await (await s.admin("/api/v1/overview")).json()) as { devices: { expiring: Array<{ id: string; personName: string }> } };
+    expect(o.devices.expiring).toEqual([expect.objectContaining({ id: device.id, name: "Laptop", personName: "Dana Kim" })]);
+  });
+
   it("accepts a heartbeat with many sessions", async () => {
     const many = Array.from({ length: 2000 }, (_, i) => live(`cn-${i}`));
     expect((await beat(many)).status).toBe(202);

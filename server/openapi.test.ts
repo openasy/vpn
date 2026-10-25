@@ -151,6 +151,12 @@ describe("responses match openapi.json", () => {
     await call("DELETE", "/api/v1/servers/{id}", admin(), "/api/v1/servers/fra-1");
   });
 
+  it("overview", async () => {
+    const { body } = await call("GET", "/api/v1/overview", admin());
+    expect((body as { hourly: { hours: unknown[] } }).hourly.hours).toHaveLength(24);
+    await call("GET", "/api/v1/overview", {});
+  });
+
   it("people, devices, groups and IP groups", async () => {
     const group = (await call("POST", "/api/v1/groups", { method: "POST", ...admin({ name: "SRE on-call" }) })).body as { id: string };
     await call("POST", "/api/v1/groups", admin({ name: "SRE on-call" }));

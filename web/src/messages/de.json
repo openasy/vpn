@@ -1,5 +1,6 @@
 {
   "nav": {
+    "overview": "Übersicht",
     "people": "Personen",
     "access": "Zugriff",
     "sessions": "Sitzungen",
@@ -8,6 +9,29 @@
     "signin": "Anmeldung",
     "tokens": "API-Tokens",
     "account": "Konto"
+  },
+  "overview": {
+    "title": "Übersicht",
+    "description": "Wer gerade verbunden ist, wie es den Servern geht und was Aufmerksamkeit braucht.",
+    "connectedNow": "Jetzt verbunden",
+    "peopleOnline": "Personen online",
+    "ofActive": "von {{n}} aktiven",
+    "serversOnline": "Server online",
+    "ofServers": "von {{n}}",
+    "certificatesEnding": "Ablaufende Zertifikate",
+    "certificatesEndingDetail": "Geräte, deren Zertifikat in 30 Tagen abläuft. Fügen Sie der Person vorher ein neues Gerät hinzu.",
+    "ends": "Läuft ab",
+    "startTitle": "Beginnen Sie mit den Personen, die sich verbinden",
+    "startBody": "Fügen Sie eine Person und ein Gerät für sie hinzu; das Gerät erhält eine Client-Konfiguration für OpenVPN.",
+    "addPeople": "Personen hinzufügen",
+    "sessionsPerHour": "Sitzungen pro Stunde",
+    "sessionsPerHourDetail": "Die meisten gleichzeitig verbundenen Geräte in jeder der letzten 24 Stunden, über alle Server.",
+    "servers": "Server",
+    "serversDetail": "Jeder Server laut seinem letzten Heartbeat.",
+    "serversCaption": "Server",
+    "online": "Online",
+    "connected": "verbunden",
+    "other": "Andere"
   },
   "role": {
     "owner": "Inhaber",

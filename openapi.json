@@ -549,6 +549,49 @@
         "x-openasy-role": "viewer"
       }
     },
+    "/api/v1/overview": {
+      "get": {
+        "operationId": "getOverview",
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Overview",
+        "description": "People, devices, servers and live sessions now, the most sessions in each of the last 24 hours, traffic by person and devices whose certificate ends within 30 days.\n\nNeeds the viewer role.",
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiToken": []
+          },
+          {
+            "adminToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What the overview shows.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Overview"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "403": {
+            "$ref": "#/components/responses/Problem"
+          },
+          "503": {
+            "$ref": "#/components/responses/Problem"
+          }
+        },
+        "x-openasy-role": "viewer"
+      }
+    },
     "/api/v1/sessions/{server}/{device}": {
       "delete": {
         "operationId": "disconnectSession",
@@ -2731,6 +2774,192 @@
             "examples": [
               "ovs_..."
             ]
+          }
+        }
+      },
+      "Overview": {
+        "type": "object",
+        "required": [
+          "people",
+          "devices",
+          "sessions",
+          "peopleOnline",
+          "servers",
+          "hourly",
+          "byServer",
+          "traffic"
+        ],
+        "properties": {
+          "people": {
+            "type": "object",
+            "required": [
+              "active",
+              "suspended"
+            ],
+            "properties": {
+              "active": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "suspended": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "devices": {
+            "type": "object",
+            "required": [
+              "active",
+              "expiring"
+            ],
+            "properties": {
+              "active": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "expiring": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "name",
+                    "personId",
+                    "personName",
+                    "notAfter"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "personId": {
+                      "type": "string"
+                    },
+                    "personName": {
+                      "type": "string"
+                    },
+                    "notAfter": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "sessions": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "peopleOnline": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "servers": {
+            "type": "object",
+            "description": "Servers by status.",
+            "required": [
+              "online",
+              "offline",
+              "version-mismatch",
+              "waiting-to-enrol"
+            ],
+            "properties": {
+              "online": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "offline": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "version-mismatch": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "waiting-to-enrol": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "hourly": {
+            "type": "object",
+            "description": "The most sessions reported in each of the last 24 hours, summed over servers, oldest first.",
+            "required": [
+              "hours",
+              "sessions"
+            ],
+            "properties": {
+              "hours": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "sessions": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "byServer": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "sessions"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "sessions": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "traffic": {
+            "type": "array",
+            "description": "Bytes in and out of live sessions by person, the largest eight.",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "name",
+                "personId",
+                "bytes"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "personId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "bytes": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
           }
         }
       }
