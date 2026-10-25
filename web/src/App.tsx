@@ -12,13 +12,14 @@ import {
   type ProductId,
   useThemePreference,
 } from "@openasy/ui";
-import { AccountSettings, AuthGate, MembersSettings, SignInSettings, TokensSettings, useAuth, useInstallBrand } from "@openasy/auth/react";
+import { AccountSettings, AuthGate, MembersSettings, SignInSettings, TokensSettings, useAccountMenu, useAuth, useInstallBrand } from "@openasy/auth/react";
 import colophon from "virtual:openasy-colophon";
 import { Activity, KeyRound, LogIn, LogOut, Network, Server as ServerIcon, UserRound, Users, UsersRound } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, type Person, type ProductLink, type Session } from "./api.ts";
 import { AccessPage } from "./access.tsx";
 import { useT } from "./i18n.ts";
+import { search } from "./search.ts";
 import { PeoplePage, PersonPage } from "./people.tsx";
 import { ServersPage } from "./servers.tsx";
 import { SessionsPage } from "./sessions.tsx";
@@ -40,7 +41,9 @@ function Product() {
   const [theme, setTheme] = useThemePreference();
   const [, setLocale] = useLocalePreference();
   const { me, can, signOut } = useAuth();
+  const account = useAccountMenu();
   const call = useApi();
+  const onSearch = useMemo(() => search(call, t), [call, t]);
   const [version, setVersion] = useState<string>();
   const [products, setProducts] = useState<Array<ProductLink & { id: ProductId }>>([]);
   const route = parseRoute(usePath());
@@ -80,6 +83,7 @@ function Product() {
   return (
     <AppShell
       product="vpn"
+      onSearch={onSearch}
       about={colophon}
       nav={nav}
       activeNav={page === "person" ? "people" : page}
@@ -89,8 +93,8 @@ function Product() {
         const to = products.find((p) => p.id === id);
         if (to) window.location.assign(to.url);
       }}
-      footerNav={footerNav}
-      user={{ name: me.user.name, role: t(`role.${me.user.role}`) }}
+      footerNav={account.settings(footerNav)}
+      user={{ name: me.user.name, role: t(`role.${me.user.role}`), ...account.user }}
       theme={theme}
       onThemeChange={setTheme}
       onLanguageChange={(code) => setLocale(toLocale(code))}

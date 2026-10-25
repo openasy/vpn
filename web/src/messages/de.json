@@ -109,7 +109,11 @@
     "end": "Beenden",
     "notEnded": "Nicht beendet",
     "live": "Aktive Sitzungen",
-    "nobody": "Niemand ist verbunden"
+    "nobody": "Niemand ist verbunden",
+    "trafficByPerson": "Datenverkehr nach Person",
+    "inAndOutSinceTheyConnected": "Ein- und ausgehend zusammen, seit jede Sitzung verbunden ist.",
+    "sessionsByServer": "Sitzungen nach Server",
+    "connectedNowToEachServer": "Geräte, die jetzt mit jedem Server verbunden sind."
   },
   "access": {
     "title": "Zugriff",
@@ -190,5 +194,10 @@
     "addBody": "Seine Adresse ist der Hostname oder die IP, mit der sich Clients verbinden; leer lassen, um VPN_PUBLIC_HOST zu verwenden.",
     "noneYet": "Noch keine Server",
     "noneYetBody": "Fügen Sie einen hinzu und starten Sie vpn-server mit seinem Token; er erscheint innerhalb von 15 Sekunden."
+  },
+  "search": {
+    "person": "Person",
+    "server": "Server",
+    "personDetail": "{{email}} · {{devices}} Geräte"
   }
 }

@@ -109,7 +109,11 @@
     "end": "Sonlandır",
     "notEnded": "Sonlandırılmadı",
     "live": "Canlı oturumlar",
-    "nobody": "Kimse bağlı değil"
+    "nobody": "Kimse bağlı değil",
+    "trafficByPerson": "Kişiye göre trafik",
+    "inAndOutSinceTheyConnected": "Gelen ve giden birlikte, her oturum bağlandığından beri.",
+    "sessionsByServer": "Sunucuya göre oturumlar",
+    "connectedNowToEachServer": "Her sunucuya şu an bağlı cihazlar."
   },
   "access": {
     "title": "Erişim",
@@ -190,5 +194,10 @@
     "addBody": "Adresi, istemcilerin bağlandığı ana makine adı veya IP'dir; VPN_PUBLIC_HOST kullanmak için boş bırakın.",
     "noneYet": "Henüz sunucu yok",
     "noneYetBody": "Bir tane ekleyin, sonra vpn-server'ı token'ıyla başlatın; 15 saniye içinde görünür."
+  },
+  "search": {
+    "person": "Kişi",
+    "server": "Sunucu",
+    "personDetail": "{{email}} · {{devices}} cihaz"
   }
 }

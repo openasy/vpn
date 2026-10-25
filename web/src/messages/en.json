@@ -109,7 +109,11 @@
     "end": "End",
     "notEnded": "Not ended",
     "live": "Live sessions",
-    "nobody": "Nobody is connected"
+    "nobody": "Nobody is connected",
+    "trafficByPerson": "Traffic by person",
+    "inAndOutSinceTheyConnected": "In and out together, since each session connected.",
+    "sessionsByServer": "Sessions by server",
+    "connectedNowToEachServer": "Devices connected now to each server."
   },
   "access": {
     "title": "Access",
@@ -190,5 +194,10 @@
     "addBody": "Its address is the host name or IP clients connect to; leave it empty to use VPN_PUBLIC_HOST.",
     "noneYet": "No servers yet",
     "noneYetBody": "Add one, then start vpn-server with its token; it shows up within 15 seconds."
+  },
+  "search": {
+    "person": "Person",
+    "server": "Server",
+    "personDetail": "{{email}} · {{devices}} devices"
   }
 }
