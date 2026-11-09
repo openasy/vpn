@@ -3,7 +3,7 @@ import { useAuth } from "@openasy/auth/react";
 import { Copy } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { api, MfaSetupRequired, Unauthorized } from "./api.ts";
-import { useT, type T } from "./i18n.ts";
+import { useT, type T, viewerLocale, fixed } from "./i18n.ts";
 
 /** Data loading with the session; when it ends, the sign-in screen comes back. */
 export function useApi() {
@@ -76,14 +76,14 @@ export function ago(t: T, iso: string | null | undefined): string {
   return t("time.days", { n: Math.round(s / 86_400) });
 }
 
-export const date = (iso: string) => new Date(iso).toLocaleDateString();
+export const date = (iso: string) => new Date(iso).toLocaleDateString(viewerLocale());
 
 export function bytes(n: number): string {
   const u = ["B", "KiB", "MiB", "GiB", "TiB"];
   let i = 0;
   let v = n;
   while (v >= 1024 && i < u.length - 1) ((v /= 1024), i++);
-  return `${v >= 10 || i === 0 ? Math.round(v) : v.toFixed(1)} ${u[i]}`;
+  return `${v >= 10 || i === 0 ? Math.round(v) : fixed(v, 1)} ${u[i]}`;
 }
 
 /** Saves text as a file in the browser. */

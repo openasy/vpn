@@ -3,7 +3,7 @@ import { useAuth } from "@openasy/auth/react";
 import { Check, Pencil, Plus, RotateCw, Trash2 } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import type { NewServer, Server } from "./api.ts";
-import { useT, type T } from "./i18n.ts";
+import { useT, type T, viewerLocale } from "./i18n.ts";
 import { ago, Code, List, Problem, useAction, useData, type Call } from "./shared.tsx";
 
 function state(t: T, s: Server): { tone: "success" | "warning" | "danger" | "info"; label: string } {
@@ -28,7 +28,7 @@ function EnrollCommand({ added, version, onDone }: { added: NewServer; version?:
       icon={<Check aria-hidden className="size-4" />}
       iconTone="success"
       title={t("servers.startTitle", { id })}
-      description={t("servers.worksOnce", { date: new Date(added.enrollExpiresAt).toLocaleString() })}
+      description={t("servers.worksOnce", { date: new Date(added.enrollExpiresAt).toLocaleString(viewerLocale()) })}
       footer={
         <Button variant="primary" onClick={onDone}>
           {t("common.done")}
@@ -120,7 +120,7 @@ export function ServersPage({ call, version }: { call: Call; version?: string })
       id: "seen",
       header: t("servers.lastHeartbeat"),
       width: "130px",
-      cell: (s) => <span title={s.lastSeen ? new Date(s.lastSeen).toLocaleString() : undefined}>{ago(t, s.lastSeen)}</span>,
+      cell: (s) => <span title={s.lastSeen ? new Date(s.lastSeen).toLocaleString(viewerLocale()) : undefined}>{ago(t, s.lastSeen)}</span>,
       sortValue: (s) => s.lastSeen ?? "",
     },
     ...(can("admin")

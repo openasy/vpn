@@ -15,7 +15,7 @@ import {
 } from "@openasy/ui";
 import { Activity, KeyRound, Laptop, Server as ServerIcon, UsersRound } from "lucide-react";
 import type { Overview } from "./api.ts";
-import { useT } from "./i18n.ts";
+import { useT, viewerLocale } from "./i18n.ts";
 import { bytes, date, List, useData, type Call } from "./shared.tsx";
 
 type Expiring = Overview["devices"]["expiring"][number];
@@ -31,7 +31,7 @@ export function OverviewPage({ call }: { call: Call }) {
   const t = useT();
   const o = useData<Overview>(call, "/api/v1/overview", 15_000).data;
   const servers = o ? Object.values(o.servers).reduce((a, b) => a + b, 0) : 0;
-  const hour = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const hour = (iso: string) => new Date(iso).toLocaleTimeString(viewerLocale(), { hour: "2-digit", minute: "2-digit" });
   const expiringColumns: Column<Expiring>[] = [
     { id: "device", header: t("common.device"), cell: (d) => d.name },
     { id: "person", header: t("sessions.person"), cell: (d) => <a href={`/people/${d.personId}`}>{d.personName}</a> },

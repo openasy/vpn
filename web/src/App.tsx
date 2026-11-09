@@ -19,7 +19,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, type Person, type ProductLink, type Session } from "./api.ts";
 import { AccessPage } from "./access.tsx";
 import { OverviewPage } from "./overview.tsx";
-import { useT } from "./i18n.ts";
+import { useT, setViewerLocale } from "./i18n.ts";
 import { search } from "./search.ts";
 import { PeoplePage, PersonPage } from "./people.tsx";
 import { ServersPage } from "./servers.tsx";
@@ -147,6 +147,7 @@ export function App() {
   const installBrand = useInstallBrand();
   const [theme] = useThemePreference();
   const [locale] = useLocalePreference();
+  setViewerLocale(locale);
   return (
     // The install's brand from config/brand.env (ADR 0053); OpenAsy's own look where it sets none.
     <BrandProvider theme={theme} locale={locale} brand={{ name: "OpenAsy", organization: undefined, ...installBrand }} className="min-h-screen">

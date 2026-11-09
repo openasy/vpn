@@ -2,7 +2,7 @@ import { Button, PageHeader, Panel, type Column } from "@openasy/ui";
 import { useAuth } from "@openasy/auth/react";
 import { Unplug } from "lucide-react";
 import type { Session } from "./api.ts";
-import { useT } from "./i18n.ts";
+import { useT, viewerLocale } from "./i18n.ts";
 import { ago, bytes, List, Problem, useAction, useData, type Call } from "./shared.tsx";
 
 type Sessions = { data?: { sessions: Session[] }; reload: () => void };
@@ -34,7 +34,7 @@ export function SessionTable({ call, personId, sessions }: { call: Call; personI
       id: "since",
       header: t("sessions.connected"),
       width: "110px",
-      cell: (s) => <span title={new Date(s.connectedAt).toLocaleString()}>{ago(t, s.connectedAt)}</span>,
+      cell: (s) => <span title={new Date(s.connectedAt).toLocaleString(viewerLocale())}>{ago(t, s.connectedAt)}</span>,
       sortValue: (s) => s.connectedAt,
     },
     {
