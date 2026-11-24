@@ -8,7 +8,7 @@ fail() { echo "FAIL: $*"; FAIL=1; }
 A="Authorization: Bearer admin-e2e"
 api() { curl -s -H "$A" -H "content-type: application/json" "$@"; }
 jsonq() { node -pe "const d=JSON.parse(require('fs').readFileSync(0)); $1"; }
-cleanup() { docker rm -f e2e-vpn e2e-udp e2e-tcp e2e-target e2e-client >/dev/null 2>&1; docker network rm e2e-pub e2e-int >/dev/null 2>&1; }
+cleanup() { docker rm -f e2e-vpn e2e-udp e2e-tcp e2e-target e2e-client e2e-home >/dev/null 2>&1; docker network rm e2e-pub e2e-int >/dev/null 2>&1; }
 cleanup
 docker network create e2e-pub >/dev/null
 docker network create --subnet 172.30.20.0/24 e2e-int >/dev/null
@@ -44,6 +44,9 @@ PERSON=$(api -X POST localhost:18090/api/v1/people -d '{"name":"Dana Kim","email
 cli() { docker run --rm --network e2e-pub -e VPN_URL=http://e2e-vpn:8080 -e VPN_API_TOKEN=admin-e2e vpn:dev cli/openasy-vpn.ts "$@"; }
 cli devices add dana@example.com Laptop --out - > "$D/client.ovpn" || fail "the command line tool did not issue the device"
 DEVICE=$(cli devices dana@example.com --json | jsonq 'd.devices[0].id')
+# A computer at home with an address of its own choosing; the IP group lets the laptop reach one port on it.
+cli devices add dana@example.com "Home desktop" --ip 10.8.0.100 --out - > "$D/home.ovpn" || fail "the home computer was not issued at 10.8.0.100"
+cli ip-groups add "Home desktop" --network 10.8.0.100=tcp/3389 --allow "Backend engineers" >/dev/null || fail "the IP group for the home computer was not added"
 cli people | grep -q "Dana Kim" || fail "the command line tool does not list Dana Kim"
 grep -v '^remote ' "$D/client.ovpn" | sed "s#^nobind#nobind\nremote vpn-tcp.test 443 tcp-client#" > "$D/client-tcp.ovpn"
 echo "remotes in client.ovpn: $(grep '^remote ' "$D/client.ovpn" | tr '\n' ';')"
@@ -87,6 +90,26 @@ echo "[UDP] tcp/8081, not allowed: $out"
 for _ in $(seq 1 10); do [ -n "$(sessions)" ] && break; sleep 1; done
 echo "[UDP] session in vpn: $(sessions)"
 [ "$(sessions)" = "e2e-udp:Dana Kim" ] || fail "the session was not listed"
+
+echo "--- reach the computer at home through the server, which opens no port towards it"
+docker run -d --name e2e-home --network e2e-pub --cap-add NET_ADMIN --device /dev/net/tun -v "$D:/c:ro" vpn-server:dev sh -c "
+  openvpn --config /c/home.ovpn --daemon --log /tmp/openvpn.log
+  node -e \"const h = require('http');
+    h.createServer((q, s) => s.end('home, from ' + q.socket.remoteAddress)).listen(3389, '0.0.0.0');
+    h.createServer((q, s) => s.end('port 8081 should be blocked')).listen(8081);\"" >/dev/null
+for _ in $(seq 1 25); do docker exec e2e-home grep -q "Initialization Sequence Completed" /tmp/openvpn.log 2>/dev/null && break; sleep 1; done
+docker exec e2e-home grep -q "Initialization Sequence Completed" /tmp/openvpn.log || fail "the home computer did not connect"
+out=$(get http://10.8.0.100:3389)
+echo "[home] tcp/3389, allowed: $out"
+# The home computer sees the laptop's own VPN address, not the server's.
+[ "$out" = "home, from 10.8.0.2" ] || fail "the laptop did not reach the home computer from its own address"
+out=$(get http://10.8.0.100:8081)
+echo "[home] tcp/8081, not allowed: $out"
+[[ "$out" == BLOCKED* ]] || fail "a port on the home computer outside the IP group was reachable"
+out=$(docker exec e2e-home node -e "fetch('http://10.8.0.2:80',{signal:AbortSignal.timeout(3000)}).then(r=>r.text()).then(console.log,e=>console.log('BLOCKED',e.cause?.code??e.name))")
+echo "[home] home computer to the laptop, not allowed: $out"
+[ "$out" = "BLOCKED TimeoutError" ] || fail "the home computer reached the laptop without a rule"
+docker rm -f e2e-home >/dev/null
 
 echo "--- disconnect the session from vpn: the device is still allowed, so it reconnects"
 api -X DELETE "localhost:18090/api/v1/sessions/e2e-udp/$DEVICE" >/dev/null

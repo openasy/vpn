@@ -229,6 +229,36 @@ describe("people, groups and devices", () => {
   });
 });
 
+describe("devices that reach each other", () => {
+  it("gives a device the address asked for, and lets an IP group name another device's address", async () => {
+    const a = await startApp({ version: "1.2.3" });
+    const send = (method: string, path: string, body: unknown) => a.admin(path, { method, body: JSON.stringify(body) });
+    await send("POST", "/api/v1/groups", { name: "Family" });
+    const person = (await (await send("POST", "/api/v1/people", { name: "Asy", email: "asy@example.com", groups: ["Family"] })).json()) as { id: string };
+    const devices = `/api/v1/people/${person.id}/devices`;
+
+    const desktop = (await (await send("POST", devices, { name: "Desktop", vpnIp: "10.8.0.100" })).json()) as { device: { id: string; vpnIp: string } };
+    expect(desktop.device.vpnIp).toBe("10.8.0.100");
+    // Taken, outside the pool, the server's own address, or not an address at all.
+    expect((await send("POST", devices, { name: "Again", vpnIp: "10.8.0.100" })).status).toBe(409);
+    for (const vpnIp of ["10.9.0.5", "10.8.0.1", "10.8.0.255", "desktop", 7]) expect((await send("POST", devices, { name: "Bad", vpnIp })).status).toBe(422);
+    const laptop = (await (await send("POST", devices, { name: "Laptop" })).json()) as { device: { id: string; vpnIp: string } };
+    expect(laptop.device.vpnIp).toBe("10.8.0.2");
+
+    // A bare address is a /32. It is inside the VPN network, so no route is pushed: only the firewall rule.
+    const res = await send("POST", "/api/v1/ip-groups", {
+      name: "Home desktop",
+      networks: [{ cidr: "10.8.0.100", ports: "tcp/3389,22" }],
+      allowedGroups: ["Family"],
+    });
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as { networks: Array<{ cidr: string }> }).networks[0]!.cidr).toBe("10.8.0.100/32");
+    const c = (await (await a.agent("/api/v1/servers/edge-1/config")).json()) as Awaited<ReturnType<typeof config>>;
+    expect(c.clients.find((x) => x.cn === laptop.device.id)).toMatchObject({ routes: [], allow: [{ cidr: "10.8.0.100/32", proto: "tcp", ports: [3389, 22] }] });
+    await a.close();
+  });
+});
+
 describe("client configs", () => {
   it("need VPN_PUBLIC_HOST", async () => {
     const noHost = await startApp({ version: "1.2.3", publicHost: undefined });

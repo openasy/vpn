@@ -203,13 +203,17 @@ function Devices({ call, person, devices, onChange }: { call: Call; person: Pers
   const t = useT();
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
+  const [vpnIp, setVpnIp] = useState("");
   const [file, setFile] = useState<{ name: string; ovpn: string }>();
   const action = useAction();
-  const close = () => (setAdding(false), setFile(undefined), setName(""), action.clear());
+  const close = () => (setAdding(false), setFile(undefined), setName(""), setVpnIp(""), action.clear());
   const add = async (e: FormEvent) => {
     e.preventDefault();
     const ok = await action.run(async () => {
-      const r = await call<{ device: Device; ovpn: string }>(`/api/v1/people/${person.id}/devices`, { method: "POST", body: JSON.stringify({ name }) });
+      const r = await call<{ device: Device; ovpn: string }>(`/api/v1/people/${person.id}/devices`, {
+        method: "POST",
+        body: JSON.stringify({ name, vpnIp: vpnIp.trim() || undefined }),
+      });
       const f = { name: `${slug(person.name)}-${slug(r.device.name)}.ovpn`, ovpn: r.ovpn };
       setFile(f);
       download(f.name, f.ovpn);
@@ -310,6 +314,14 @@ function Devices({ call, person, devices, onChange }: { call: Call; person: Pers
           >
             <Problem error={action.error} title={t("common.notAdded")} />
             <TextField label={t("common.device")} value={name} onChange={(e) => setName(e.target.value)} placeholder={t("devices.placeholder")} />
+            <TextField
+              label={t("devices.address")}
+              mono
+              value={vpnIp}
+              onChange={(e) => setVpnIp(e.target.value)}
+              placeholder="10.8.0.100"
+              hint={t("devices.addressHint")}
+            />
           </Dialog>
         )}
         {devices && devices.length === 0 ? (

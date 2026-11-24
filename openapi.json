@@ -2198,6 +2198,13 @@
             "examples": [
               "Work laptop"
             ]
+          },
+          "vpnIp": {
+            "type": "string",
+            "description": "The fixed VPN address to give the device, inside VPN_NETWORK and not used by another device. Without one, the first free address.",
+            "examples": [
+              "10.8.0.100"
+            ]
           }
         }
       },
@@ -2279,7 +2286,7 @@
         "properties": {
           "cidr": {
             "type": "string",
-            "description": "IPv4 network with host bits zero.",
+            "description": "IPv4 network with host bits zero. A single address, such as another device's VPN address, may be given without /32.",
             "examples": [
               "172.16.20.0/24"
             ]

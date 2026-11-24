@@ -106,7 +106,8 @@ How it works:
   new connection; suspending a person removes their devices until they are active again.
 - Each device gets routes to the networks of the IP groups its person's groups may use, or all traffic for a full-tunnel
   IP group. The server's firewall lets it reach only those networks and ports; everything else from the device is
-  dropped, including other devices and the server itself.
+  dropped, including other devices and the server itself. An IP group may name another device's VPN address, which
+  lets devices reach that device; see [Reach a computer at home](#reach-a-computer-at-home).
 - Servers report live sessions every heartbeat: `GET /api/v1/sessions`. A device that is revoked, suspended or deleted
   is disconnected at the next heartbeat. `DELETE /api/v1/sessions/{server}/{device}` ends one session; the device may
   reconnect if it is still allowed.
@@ -115,6 +116,38 @@ How it works:
   VPN address; each server NATs its clients, so the networks behind it see the server's address.
 - The list is fixed when the file is created: start the servers before adding devices. A server added later reaches
   only devices added after it. Give locations DNS names, so that moving a server needs no new client configs.
+
+### Reach a computer at home
+
+A computer at home, behind a home router or a mobile operator's CGNAT, can be reached from a laptop or a phone
+anywhere, with no port opened at home. The home computer connects to vpn-server like any other device; the connection
+goes out from home, so the router lets it through, and stays open. Other devices reach it at its VPN address through
+the server.
+
+1. Run vpn-server on a host every device can reach, such as a small VPS. It is the only place with an open port.
+2. Add the home computer as a device with a fixed address of your choice, and the laptop and phone as devices:
+
+   ```bash
+   openasy-vpn groups add Family
+   openasy-vpn people add "Asy" asy@example.com --group Family
+   openasy-vpn devices add asy@example.com "Home desktop" --ip 10.8.0.100
+   openasy-vpn devices add asy@example.com Laptop
+   ```
+
+3. Let the group reach the home computer, on the ports it needs and nothing else:
+
+   ```bash
+   openasy-vpn ip-groups add "Home desktop" --network 10.8.0.100=tcp/3389,22 --allow Family
+   ```
+
+4. On the home computer, run OpenVPN as a service so that it connects at start-up and after every drop: on Linux,
+   copy the file to `/etc/openvpn/client/home.conf` and run `systemctl enable --now openvpn-client@home`; on Windows,
+   put it in `C:\Program Files\OpenVPN\config-auto` for the OpenVPNService; on macOS, Tunnelblick's "Connect when
+   computer starts".
+
+The home computer sees each connection from the laptop's or phone's own VPN address, so its own firewall can tell them
+apart. Traffic between devices goes through the server, so its speed is the server's. Devices reach each other only
+while they are connected to the same server, so this suits an install with one server.
 
 ### Several locations
 

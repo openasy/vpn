@@ -16,9 +16,10 @@ Usage: openasy-vpn <command> [arguments] [--json]
   people remove <person>                    Revoke their devices and remove them
 
   devices <person>                          List their devices
-  devices add <person> <name> [--out <file>]
+  devices add <person> <name> [--ip <address>] [--out <file>]
                                             Issue a device and write its .ovpn file (--out - prints it).
                                             The file holds the device's private key and is given once.
+                                            --ip picks its fixed VPN address, for example 10.8.0.100
   devices revoke <device id>                Revoke a device for good
 
   groups                                    List groups
@@ -257,9 +258,9 @@ export async function run(argv: string[], io: Io): Promise<number> {
 
       case "devices": {
         if (sub === "add") {
-          need(4, "devices add <person> <name> [--out <file>]");
+          need(4, "devices add <person> <name> [--ip <address>] [--out <file>]");
           const p = await person(args[2]!);
-          const r = await api<{ device: Device; ovpn: string }>("POST", `/api/v1/people/${p.id}/devices`, { name: args[3] });
+          const r = await api<{ device: Device; ovpn: string }>("POST", `/api/v1/people/${p.id}/devices`, { name: args[3], vpnIp: one("ip") });
           const out = one("out") ?? `${slug(p.name)}-${slug(r.device.name)}.ovpn`;
           if (out === "-") {
             io.out(r.ovpn);

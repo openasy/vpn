@@ -245,6 +245,7 @@ function IpGroupEditor({ call, ipGroup, groups, onDone }: { call: Call; ipGroup?
       {!ipGroup && <TextField label={t("common.name")} value={name} onChange={(e) => setName(e.target.value)} placeholder={t("access.ipGroupPlaceholder")} />}
       <fieldset className="flex flex-col gap-2">
         <legend className="mb-2 text-sm font-medium">{t("access.networks")}</legend>
+        <p className="text-sm text-fg-muted">{t("access.networkHint")}</p>
         {networks.map((n, i) => (
           <div key={i} className="flex flex-wrap items-end gap-2">
             <TextField label={t("access.network")} mono value={n.cidr} onChange={(e) => set(i, { cidr: e.target.value })} placeholder="172.16.20.0/24" />

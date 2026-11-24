@@ -64,12 +64,16 @@ describe("openasy-vpn", () => {
     expect(dev.out).toContain("Wrote dana-kim-work-laptop.ovpn");
     expect(dev.files.get("dana-kim-work-laptop.ovpn")).toContain("BEGIN PRIVATE KEY");
 
+    const desktop = await cli(["devices", "add", "dana@example.com", "Desktop", "--ip", "10.8.0.100"]);
+    expect(desktop.out).toContain("Desktop (10.8.0.100)");
+    expect((await cli(["devices", "add", "dana@example.com", "Desktop 2", "--ip", "10.8.0.100"])).code).not.toBe(0);
+
     const printed = await cli(["devices", "add", "dana@example.com", "Phone", "--out", "-"]);
     expect(printed.out).toMatch(/^# OpenAsy VPN: Dana Kim, Phone/);
 
     const json = JSON.parse((await cli(["devices", "dana@example.com", "--json"])).out) as { devices: Array<{ id: string; name: string }> };
-    expect(json.devices.map((d) => d.name)).toEqual(["Work laptop", "Phone"]);
-    expect((await cli(["devices", "revoke", json.devices[1]!.id])).out).toContain("Revoked Phone");
+    expect(json.devices.map((d) => d.name)).toEqual(["Work laptop", "Desktop", "Phone"]);
+    expect((await cli(["devices", "revoke", json.devices[2]!.id])).out).toContain("Revoked Phone");
     expect((await cli(["devices", "dana@example.com"])).out).toMatch(/Phone\s+10\.8\.0\.\d+\s+revoked/);
 
     expect((await cli(["people", "suspend", "dana@example.com"])).out).toContain("Suspended Dana Kim");

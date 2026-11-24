@@ -120,7 +120,9 @@
     "noneYet": "Noch keine Geräte",
     "noneYetBody": "Fügen Sie eines hinzu; Sie erhalten seine .ovpn-Datei einmal.",
     "of": "Geräte von {{name}}",
-    "none": "Keine Geräte"
+    "none": "Keine Geräte",
+    "address": "VPN-Adresse",
+    "addressHint": "Optional. Eine feste Adresse Ihrer Wahl, für ein Gerät, mit dem sich andere verbinden; ohne Angabe die nächste freie Adresse."
   },
   "sessions": {
     "title": "Sitzungen",
@@ -175,7 +177,8 @@
     "addNetwork": "Netz hinzufügen",
     "fullTunnelBody": "Den gesamten Verkehr des Geräts durch das VPN senden, nicht nur diese Netze. Verwenden Sie es, wo der Verkehr von der Büroadresse ausgehen muss.",
     "allowedGroups": "Gruppen, die diese Netze erreichen dürfen",
-    "addGroupFirst": "Fügen Sie zuerst unten eine Gruppe hinzu."
+    "addGroupFirst": "Fügen Sie zuerst unten eine Gruppe hinzu.",
+    "networkHint": "Ein Netz wie 172.16.20.0/24 oder eine einzelne Adresse. Damit Geräte ein anderes Gerät erreichen, etwa einen Rechner zu Hause, geben Sie dessen VPN-Adresse an."
   },
   "servers": {
     "waiting": "Wartet auf Registrierung",

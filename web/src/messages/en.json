@@ -120,7 +120,9 @@
     "noneYet": "No devices yet",
     "noneYetBody": "Add one; you get its .ovpn file once.",
     "of": "Devices of {{name}}",
-    "none": "No devices"
+    "none": "No devices",
+    "address": "VPN address",
+    "addressHint": "Optional. A fixed address of your choice, for a device others connect to; without one, the next free address."
   },
   "sessions": {
     "title": "Sessions",
@@ -175,7 +177,8 @@
     "addNetwork": "Add network",
     "fullTunnelBody": "Send all of the device's traffic through the VPN, not only these networks. Use it where traffic must leave from the office address.",
     "allowedGroups": "Groups that may reach these networks",
-    "addGroupFirst": "Add a group below first."
+    "addGroupFirst": "Add a group below first.",
+    "networkHint": "A network such as 172.16.20.0/24, or one address. To let devices reach another device, such as a computer at home, give that device's VPN address."
   },
   "servers": {
     "waiting": "Waiting to enrol",

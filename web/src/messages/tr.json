@@ -120,7 +120,9 @@
     "noneYet": "Henüz cihaz yok",
     "noneYetBody": "Bir tane ekleyin; .ovpn dosyasını bir kez alırsınız.",
     "of": "{{name}} cihazları",
-    "none": "Cihaz yok"
+    "none": "Cihaz yok",
+    "address": "VPN adresi",
+    "addressHint": "İsteğe bağlı. Başka cihazların bağlanacağı bir cihaz için seçtiğiniz sabit adres; boş bırakılırsa sıradaki boş adres verilir."
   },
   "sessions": {
     "title": "Oturumlar",
@@ -175,7 +177,8 @@
     "addNetwork": "Ağ ekle",
     "fullTunnelBody": "Cihazın tüm trafiğini yalnızca bu ağlarınkini değil, VPN üzerinden gönder. Trafiğin ofis adresinden çıkması gereken yerlerde kullanın.",
     "allowedGroups": "Bu ağlara ulaşabilecek gruplar",
-    "addGroupFirst": "Önce aşağıdan bir grup ekleyin."
+    "addGroupFirst": "Önce aşağıdan bir grup ekleyin.",
+    "networkHint": "172.16.20.0/24 gibi bir ağ ya da tek bir adres. Cihazların başka bir cihaza, örneğin evdeki bir bilgisayara erişmesi için o cihazın VPN adresini yazın."
   },
   "servers": {
     "waiting": "Kayıt bekleniyor",

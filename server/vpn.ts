@@ -1,7 +1,7 @@
 // The VPN's data: people, groups, IP groups, devices and what each vpn-server must run.
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import { clientAddresses, formatCidr, formatIp, parseCidr, parseIp, parsePorts, type Cidr } from "./net.ts";
+import { clientAddresses, formatCidr, formatIp, maskOf, parseCidr, parseIp, parsePorts, type Cidr } from "./net.ts";
 import type { Keyring } from "./kek.ts";
 import { crl, createCa, issue, tlsCryptKey, type Ca } from "./pki.ts";
 
@@ -169,6 +169,11 @@ export interface VpnOptions {
 export function createVpn(db: DatabaseSync, opts: VpnOptions) {
   const network = parseCidr(opts.network);
   if (!network || network.prefix > 29) throw new Error(`VPN_NETWORK must be an IPv4 network of /29 or larger, not "${opts.network}"`);
+  /** Whether a network lies inside the VPN network, so it is one or more devices. */
+  const insideVpn = (cidr: string) => {
+    const c = parseCidr(cidr)!;
+    return c.prefix >= network.prefix && (c.network & maskOf(network.prefix)) >>> 0 === network.network;
+  };
 
   const setting = db.prepare("SELECT value FROM settings WHERE key = ?");
   const putSetting = db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value");
@@ -330,8 +335,10 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
     if (body.networks !== undefined) {
       if (!Array.isArray(body.networks)) throw invalid("networks must be a list of { cidr, ports?, note? }.");
       const rows = body.networks.map((n: { cidr?: unknown; ports?: unknown; note?: unknown }) => {
-        const cidr = typeof n?.cidr === "string" ? parseCidr(n.cidr.trim()) : undefined;
-        if (!cidr) throw invalid(`"${String(n?.cidr)}" is not an IPv4 network such as 172.16.20.0/24.`);
+        // A single address, such as a device's VPN address, needs no /32.
+        const text = typeof n?.cidr === "string" ? n.cidr.trim() : "";
+        const cidr = parseCidr(text.includes("/") ? text : `${text}/32`);
+        if (!cidr) throw invalid(`"${String(n?.cidr)}" is not an IPv4 network such as 172.16.20.0/24, or an address such as 10.8.0.10.`);
         const ports = typeof n.ports === "string" ? n.ports.trim() || "any" : "any";
         if (!parsePorts(ports)) throw invalid(`"${ports}" is not a port list such as tcp/5432, 6432 or any.`);
         return { cidr: formatCidr(cidr), ports, note: typeof n.note === "string" ? n.note.slice(0, 200) : "" };
@@ -402,15 +409,23 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
     return (db.prepare("SELECT * FROM devices WHERE person_id = ? ORDER BY created_at").all(personId) as Parameters<typeof toDevice>[0][]).map(toDevice);
   }
 
-  function allocateIp(): string {
+  /** The address asked for, when it is free and in the pool, or else the first free one. */
+  function allocateIp(wanted?: unknown): string {
     const used = new Set((db.prepare("SELECT vpn_ip FROM devices WHERE revoked_at IS NULL").all() as Array<{ vpn_ip: string }>).map((r) => parseIp(r.vpn_ip)));
     const { first, last } = clientAddresses(network as Cidr);
+    if (wanted !== undefined && wanted !== null && wanted !== "") {
+      const ip = typeof wanted === "string" ? parseIp(wanted.trim()) : undefined;
+      if (ip === undefined || ip < first || ip > last)
+        throw invalid(`vpnIp must be an address in ${opts.network} from ${formatIp(first)} to ${formatIp(last)}, for example ${formatIp(first + 8)}.`);
+      if (used.has(ip)) throw new VpnError(409, "conflict", `${formatIp(ip)} is used by another device. Pick another address, or revoke that device first.`);
+      return formatIp(ip);
+    }
     for (let ip = first; ip <= last; ip++) if (!used.has(ip)) return formatIp(ip);
     throw new VpnError(409, "conflict", `No free address left in ${opts.network}. Revoke unused devices or use a larger VPN_NETWORK.`);
   }
 
   /** Issues a certificate for a new device and returns its client config. The private key is not kept. */
-  async function createDevice(personId: string, body: { name?: unknown }): Promise<{ device: Device; ovpn: string }> {
+  async function createDevice(personId: string, body: { name?: unknown; vpnIp?: unknown }): Promise<{ device: Device; ovpn: string }> {
     const p = person(personId);
     if (p.status !== "active") throw new VpnError(409, "conflict", `${p.name} is suspended; activate them before adding a device.`);
     if (!remotes().length)
@@ -421,9 +436,11 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
       );
     const name = typeof body.name === "string" ? body.name.trim() : "";
     if (!name || name.length > 100) throw invalid('name is required, at most 100 characters, for example "Work laptop".');
+    // Checked before the certificate is issued, so a taken address costs nothing.
+    allocateIp(body.vpnIp);
     const id = randomUUID();
     const cert = await issue(ca(), "client", id);
-    const ip = allocateIp();
+    const ip = allocateIp(body.vpnIp);
     db.prepare("INSERT INTO devices (id, person_id, name, serial, vpn_ip, cert, not_after, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
       id,
       personId,
@@ -520,7 +537,8 @@ export function createVpn(db: DatabaseSync, opts: VpnOptions) {
         if (g.full_tunnel) fullTunnel = true;
         for (const n of db.prepare("SELECT cidr, ports FROM ip_group_networks WHERE ip_group_id = ?").all(g.id) as Array<{ cidr: string; ports: string }>) {
           if (n.cidr === "0.0.0.0/0") fullTunnel = true;
-          else routes.add(n.cidr);
+          // Other devices are reached through the tunnel already; the firewall rule below is what lets them through.
+          else if (!insideVpn(n.cidr)) routes.add(n.cidr);
           for (const rule of parsePorts(n.ports)!) {
             const a: Allow = { cidr: n.cidr, proto: rule.proto, ports: rule.ports };
             allow.set(JSON.stringify(a), a);
